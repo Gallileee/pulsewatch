@@ -55,6 +55,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/status", s.status)
 	mux.HandleFunc("GET /api/events", s.events)
 	mux.HandleFunc("GET /metrics", s.metrics)
+	mux.HandleFunc("GET /badge/{file}", s.badge)
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 		_, _ = w.Write([]byte("ok\n"))
@@ -81,6 +82,16 @@ func (s *Server) WriteSite(dir string) error {
 		return err
 	}
 	files := map[string][]byte{"index.html": html.Bytes(), "status.json": append(data, '\n')}
+	if err := os.MkdirAll(filepath.Join(dir, "badge"), 0o755); err != nil {
+		return err
+	}
+	for _, t := range page.Targets {
+		badge, err := json.Marshal(BadgeFor(t))
+		if err != nil {
+			return err
+		}
+		files[filepath.Join("badge", t.ID+".json")] = append(badge, '\n')
+	}
 	assets, _ := fs.Sub(staticFiles, "static")
 	if err := fs.WalkDir(assets, ".", func(path string, d fs.DirEntry, err error) error {
 		if err != nil || d.IsDir() {

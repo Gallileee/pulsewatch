@@ -306,3 +306,46 @@ func TestWriteSite(t *testing.T) {
 		}
 	}
 }
+
+func TestBadges(t *testing.T) {
+	for _, c := range []struct {
+		view    TargetView
+		message string
+		color   string
+	}{
+		{TargetView{Status: "up", StatusText: "Operational", Uptime7d: 0.9995}, "operational · 99.95 % (7 d)", "brightgreen"},
+		{TargetView{Status: "degraded", StatusText: "Degraded", Uptime7d: 1}, "degraded · 100 % (7 d)", "yellow"},
+		{TargetView{Status: "down", StatusText: "Down", Uptime7d: 0.5}, "down · 50 % (7 d)", "red"},
+		{TargetView{Status: "unknown", StatusText: "Not checked yet", Uptime7d: -1}, "not checked yet", "lightgrey"},
+	} {
+		b := BadgeFor(c.view)
+		if b.Message != c.message || b.Color != c.color || b.SchemaVersion != 1 || b.Label != "status" || b.CacheSeconds != 300 {
+			t.Errorf("%+v", b)
+		}
+	}
+
+	s, _ := newServer(fixture())
+	h := s.Handler()
+	rec := get(t, h, "/badge/api.json")
+	var b Badge
+	if err := json.Unmarshal(rec.Body.Bytes(), &b); err != nil || b.Message != "down · 0 % (7 d)" || b.Color != "red" {
+		t.Errorf("%d %s %v", rec.Code, rec.Body.String(), err)
+	}
+	if rec.Header().Get("Access-Control-Allow-Origin") != "*" {
+		t.Error("no CORS header")
+	}
+	for _, path := range []string{"/badge/nope.json", "/badge/api", "/badge/api.svg"} {
+		if rec := get(t, h, path); rec.Code != 404 {
+			t.Errorf("%s: %d", path, rec.Code)
+		}
+	}
+
+	dir := t.TempDir()
+	if err := s.WriteSite(dir); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(filepath.Join(dir, "badge", "web.json"))
+	if err != nil || !strings.Contains(string(data), `"message":"operational · 100 % (7 d)"`) {
+		t.Errorf("%s %v", data, err)
+	}
+}

@@ -67,6 +67,15 @@ watches my other projects, [Market Pulse](https://gallileee.github.io/market-pul
     `pulsewatch_checks_total`, a `pulsewatch_check_duration_seconds` histogram,
     `pulsewatch_incident_open` and `pulsewatch_tls_cert_expiry_timestamp_seconds`.
   - `/healthz` answers `ok`.
+  - `/badge/<id>.json` is a target's status and 7-day uptime for a
+    [Shields.io endpoint badge](https://shields.io/badges/endpoint-badge). A README can show
+    it, for example ![status](https://img.shields.io/endpoint?url=https%3A%2F%2Fgallileee.github.io%2Fpulsewatch%2Fbadge%2Fmarket-pulse.json):
+
+    ```markdown
+    ![status](https://img.shields.io/endpoint?url=https%3A%2F%2Fgallileee.github.io%2Fpulsewatch%2Fbadge%2Fmarket-pulse.json)
+    ```
+
+    The static site (`-site`) writes the same files under `badge/`.
 
 ## Configuration
 
