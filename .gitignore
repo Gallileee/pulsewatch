@@ -1,0 +1,12 @@
+# Builds
+/bin/
+/pulsewatch
+/pulsewatch.exe
+*.test
+*.out
+
+# Local config, history and secrets
+/pulsewatch.yaml
+pulsewatch-data.json
+pulsewatch-data.json.*
+.env
