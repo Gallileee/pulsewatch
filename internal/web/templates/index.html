@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{.Title}}</title>
+  <meta name="color-scheme" content="light dark">
+  <link rel="stylesheet" href="/static/style.css">
+  <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
+  <script src="/static/app.js" defer></script>
+</head>
+<body>
+  <header class="top">
+    <div class="wrap">
+      <h1>{{.Title}}</h1>
+      <p class="live-state" id="live-state" aria-live="polite">Live updates off</p>
+    </div>
+  </header>
+  <main class="wrap" id="live">
+    {{template "live" .}}
+  </main>
+  <footer class="wrap foot">
+    <p>Uptime counts degraded checks as up. Days are in UTC.
+      <a href="/api/status">JSON</a> · <a href="/metrics">Prometheus metrics</a> ·
+      Powered by <a href="https://github.com/Gallileee/pulsewatch">Pulsewatch</a></p>
+  </footer>
+</body>
+</html>
+
+{{define "live"}}
+<section class="banner banner-{{.Overall.Status}}" aria-labelledby="overall">
+  <h2 id="overall">{{.Overall.Text}}</h2>
+  <p>Updated <time datetime="{{iso .Generated}}" data-relative>{{clock .Generated}}</time></p>
+</section>
+
+<section aria-label="Services" class="targets">
+  {{range .Targets}}
+  <article class="target status-{{.Status}}" id="target-{{.ID}}">
+    <header class="target-head">
+      <h3>{{.Name}} <span class="type">{{.Type}}</span></h3>
+      <span class="pill pill-{{.Status}}">{{.StatusText}}</span>
+    </header>
+    <p class="message">
+      {{if .Message}}{{.Message}}{{else}}&nbsp;{{end}}
+      {{if not .LastChecked.IsZero}}<span class="muted">· {{ms .LatencyMs}} · checked
+        <time datetime="{{iso .LastChecked}}" data-relative>{{clock .LastChecked}}</time></span>{{end}}
+    </p>
+    <dl class="uptimes">
+      <div><dt>24 hours</dt><dd>{{percent .Uptime24h}}</dd></div>
+      <div><dt>7 days</dt><dd>{{percent .Uptime7d}}</dd></div>
+      <div><dt>90 days</dt><dd>{{percent .Uptime90d}}</dd></div>
+    </dl>
+    <div class="bars" role="img" aria-label="Uptime per day over the last 90 days, {{percent .Uptime90d}} in total">
+      {{range .Days}}<span class="bar bar-{{.Class}}" title="{{.Label}}"></span>{{end}}
+    </div>
+    <div class="bars-legend muted"><span>90 days ago</span><span>Today</span></div>
+    {{if .Spark}}
+    <figure class="spark">
+      <svg viewBox="0 0 240 40" preserveAspectRatio="none" aria-hidden="true"><path d="{{.Spark}}"/></svg>
+      <figcaption class="muted">Response time, last {{len .Recent}} checks (peak {{ms .SparkMax}})</figcaption>
+    </figure>
+    {{end}}
+  </article>
+  {{end}}
+</section>
+
+<section class="incidents" aria-labelledby="incidents-title">
+  <h2 id="incidents-title">Incidents</h2>
+  {{if .Incidents}}
+  <ol>
+    {{range .Incidents}}
+    <li class="incident {{if .Open}}incident-open{{end}}">
+      <p><strong>{{.TargetName}}</strong>
+        {{if .Open}}<span class="pill pill-down">Ongoing</span>{{else}}<span class="pill pill-up">Resolved</span>{{end}}</p>
+      <p>{{.Cause}}</p>
+      <p class="muted">Started <time datetime="{{iso .Started}}">{{clock .Started}}</time>
+        · {{if .Open}}going on for{{else}}lasted{{end}} {{.DurationText}} · {{.Checks}} failed checks</p>
+    </li>
+    {{end}}
+  </ol>
+  {{else}}
+  <p class="muted">No incidents recorded.</p>
+  {{end}}
+</section>
+{{end}}

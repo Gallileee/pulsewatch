@@ -1,0 +1,61 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5  # v7.1.0
+        with:
+          go-version-file: go.mod
+      - name: gofmt
+        if: runner.os == 'Linux'
+        run: test -z "$(gofmt -l .)" || { gofmt -l .; exit 1; }
+      - run: go vet ./...
+      # -race needs cgo, which the Linux runner has.
+      - run: go test -race ./...
+        if: runner.os == 'Linux'
+      - run: go test ./...
+        if: runner.os != 'Linux'
+      - run: go build ./cmd/pulsewatch
+
+  # The image builds, and the binary in it starts and serves the demo's status page.
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
+        with:
+          persist-credentials: false
+      - run: docker build --build-arg VERSION=ci -t pulsewatch:ci .
+      - run: docker run --rm pulsewatch:ci -version
+      - name: demo smoke test
+        run: |
+          docker run -d --name pw -p 8090:8090 pulsewatch:ci -demo -listen 0.0.0.0:8090
+          for i in $(seq 1 30); do curl -fsS http://localhost:8090/healthz && break; sleep 1; done
+          sleep 12
+          curl -fsS http://localhost:8090/api/status | grep -q '"status": "up"'
+          curl -fsS http://localhost:8090/metrics | grep -q '^pulsewatch_up{target="website"'
+          docker logs pw
+          docker rm -f pw
+
+  # This workflow checked by workflow-guard (https://github.com/Gallileee/workflow-guard).
+  workflow-guard:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
+        with:
+          persist-credentials: false
+      - uses: Gallileee/workflow-guard@797a2de6a1262fef597b821dda82249018ebd169  # v0.37.0

@@ -1,0 +1,41 @@
+# Pulsewatch: an example config. Copy it to pulsewatch.yaml and change the targets.
+# ${VARIABLES} are read from the environment, so secrets (webhook URLs) stay out of this file.
+
+title: Gallileee status
+listen: ":8080"
+# The history is kept here across restarts (remove the line to keep it in memory only).
+data_file: pulsewatch-data.json
+# Linked from the alerts, if the page is reachable from outside.
+# public_url: https://status.example.com
+max_concurrent: 10
+
+incidents:
+  failures_to_open: 2       # failed checks in a row before an incident opens
+  successes_to_resolve: 2   # good checks in a row before it's resolved
+
+# alerts:
+#   - name: team chat
+#     format: discord         # webhook (JSON), discord or slack
+#     url: ${DISCORD_WEBHOOK_URL}
+
+targets:
+  - name: Market Pulse
+    url: https://gallileee.github.io/market-pulse/
+    interval: 1m
+    expect_body: Market Pulse
+    degraded_after: 2s
+
+  - name: GitHub API
+    url: https://api.github.com/zen
+    interval: 2m
+
+  - name: GitHub Pages certificate
+    type: tls
+    host: gallileee.github.io
+    interval: 1h
+    warn_days: 14
+
+  - name: GitHub DNS
+    type: dns
+    host: github.com
+    interval: 5m
