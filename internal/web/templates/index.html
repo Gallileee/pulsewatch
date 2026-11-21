@@ -5,15 +5,16 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{{.Title}}</title>
   <meta name="color-scheme" content="light dark">
-  <link rel="stylesheet" href="/static/style.css">
-  <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
-  <script src="/static/app.js" defer></script>
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' data:; style-src 'self'; script-src 'self'; connect-src 'self'; base-uri 'none'; form-action 'none'">
+  <link rel="stylesheet" href="static/style.css">
+  <link rel="icon" href="static/favicon.svg" type="image/svg+xml">
+  <script src="static/app.js" defer></script>
 </head>
-<body>
+<body data-mode="{{if .Static}}static{{else}}live{{end}}">
   <header class="top">
     <div class="wrap">
       <h1>{{.Title}}</h1>
-      <p class="live-state" id="live-state" aria-live="polite">Live updates off</p>
+      <p class="live-state" id="live-state" aria-live="polite">{{if .Static}}Checked every few minutes{{else}}Live updates off{{end}}</p>
     </div>
   </header>
   <main class="wrap" id="live">
@@ -21,7 +22,7 @@
   </main>
   <footer class="wrap foot">
     <p>Uptime counts degraded checks as up. Days are in UTC.
-      <a href="/api/status">JSON</a> · <a href="/metrics">Prometheus metrics</a> ·
+      {{if .Static}}<a href="status.json">JSON</a>{{else}}<a href="api/status">JSON</a> · <a href="metrics">Prometheus metrics</a>{{end}} ·
       Powered by <a href="https://github.com/Gallileee/pulsewatch">Pulsewatch</a></p>
   </footer>
 </body>

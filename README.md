@@ -5,11 +5,15 @@ a schedule, keeps 90 days of history, opens an incident when something stays dow
 alert to Discord, Slack or any webhook, and serves a public status page that updates itself
 live. One binary, one YAML file, Prometheus metrics included.
 
+**Live status page: https://gallileee.github.io/pulsewatch/**. It watches my other projects,
+runs on GitHub Actions every 5 minutes and costs nothing ([how](#free-hosting-on-github-actions-and-pages)).
+
 ![The status page during a demo outage](docs/status-page.jpg)
 
 ```
 $ pulsewatch -demo                      # a local demo service with outages, page on :8090
 $ pulsewatch -config pulsewatch.yaml    # your own targets
+$ pulsewatch -once -site site           # check once, write a static page (cron, CI)
 $ docker compose up --build             # Pulsewatch + Prometheus
 ```
 
@@ -116,6 +120,38 @@ and Prometheus on :9090 scraping it. The image is distroless and runs as a non-r
 history lives in a volume. For alerts, put `DISCORD_WEBHOOK_URL=...` in a `.env` file next to
 `docker-compose.yml` (it's git-ignored) and uncomment the alert in the config.
 
+### Free hosting on GitHub Actions and Pages
+
+Pulsewatch doesn't have to run all the time. `pulsewatch -once` checks every target once,
+saves the history and exits, and `-site DIR` also writes the status page as static files
+(`index.html`, `status.json`, `static/`). The incident streaks are saved with the history, so
+two runs in a row that fail open an incident like two checks in a row do. Nothing about the
+history changes between modes, so a `pulsewatch-data.json` from a server works here too.
+
+[.github/workflows/status.yml](.github/workflows/status.yml) runs it every 5 minutes with
+[deploy/status.yaml](deploy/status.yaml):
+
+1. It builds Pulsewatch.
+2. It downloads the history that the last run uploaded as an artifact.
+3. It checks the targets.
+4. It uploads the new history.
+5. It publishes `site/` to GitHub Pages.
+
+On a public repository this costs nothing. The trade-offs:
+- The static page has no live stream: it reloads its content once a minute.
+- There's no `/metrics`.
+- Scheduled runs are often a few minutes late.
+- GitHub pauses scheduled workflows after 60 days without activity in the repository.
+- The history artifacts are kept for 3 days, so the history survives an outage of the
+  workflow shorter than that.
+
+To use it in a fork:
+1. Set **Settings → Pages → Source** to "GitHub Actions".
+2. Change `deploy/status.yaml`.
+3. For alerts, add the webhook as a repository secret and pass it to the run step in `env:`.
+
+### The demo
+
 The **demo** (`-demo`) runs a small local service that misbehaves on purpose:
 - one endpoint is always fine;
 - one is slow, so it's degraded;
@@ -169,7 +205,8 @@ smoke test of the demo inside it. The workflow itself is checked by
 ## Limits
 
 - One instance: there is no clustering, so the monitor can't watch itself. Run a second one
-  somewhere else, or use an outside check on `/healthz`.
+  somewhere else, or use an outside check on `/healthz`. On GitHub Actions, a failed run
+  shows on the Actions tab, and the page's "Updated" time stops moving.
 - Uptime counts whole hours, so "24 hours" may include up to one more hour. Days are in UTC.
 - No email alerts yet, no authentication for private pages, no maintenance windows (see
   [PROGRESS.md](PROGRESS.md)).

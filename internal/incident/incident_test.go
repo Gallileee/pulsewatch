@@ -105,3 +105,33 @@ func TestCurrentIsACopy(t *testing.T) {
 		t.Error("the tracker's incident changed")
 	}
 }
+
+func TestStateCarriesTheStreakAcrossTrackers(t *testing.T) {
+	first := NewTracker("web", "Website", 2, 2)
+	first.Observe(result(0, check.Down, "first failure"))
+	// A new tracker (the next run) continues from the saved state.
+	next := NewTracker("web", "Website", 2, 2)
+	next.Restore(first.State())
+	c := next.Observe(result(5, check.Down, "second failure"))
+	if c.Opened == nil || c.Opened.Cause != "first failure" || !c.Opened.Started.Equal(t0) {
+		t.Fatalf("%+v", c.Opened)
+	}
+	next.Observe(result(10, check.Up, ""))
+	again := NewTracker("web", "Website", 2, 2)
+	again.Restore(next.State())
+	c = again.Observe(result(15, check.Up, ""))
+	if c.Resolved == nil || !c.Resolved.Resolved.Equal(t0.Add(10*time.Minute)) {
+		t.Fatalf("%+v", c.Resolved)
+	}
+	if s := again.State(); s.Current != nil || s.FirstFailure != nil || s.Successes != 2 {
+		t.Errorf("%+v", s)
+	}
+}
+
+func TestRestoreIgnoresAnotherTargetsIncident(t *testing.T) {
+	tr := NewTracker("web", "Website", 2, 2)
+	tr.Restore(State{Failures: 3, Current: &Incident{ID: "api-1", TargetID: "api"}})
+	if tr.Current() != nil {
+		t.Error("restored another target's incident")
+	}
+}

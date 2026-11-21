@@ -63,6 +63,40 @@ func NewTracker(targetID, targetName string, failuresToOpen, successesToResolve 
 	}
 }
 
+// State is what a tracker remembers between checks, saved so a restart (or the next run of
+// pulsewatch -once) carries on where it stopped.
+type State struct {
+	Failures     int           `json:"failures"`
+	Successes    int           `json:"successes"`
+	FirstFailure *check.Result `json:"first_failure,omitempty"`
+	FirstSuccess time.Time     `json:"first_success,omitzero"`
+	Current      *Incident     `json:"current,omitempty"`
+}
+
+// State returns the tracker's state.
+func (t *Tracker) State() State {
+	s := State{Failures: t.failures, Successes: t.successes, FirstSuccess: t.firstSuccess, Current: t.Current()}
+	if t.failures > 0 {
+		first := t.firstFailure
+		s.FirstFailure = &first
+	}
+	return s
+}
+
+// Restore continues from a saved state.
+func (t *Tracker) Restore(s State) {
+	t.failures, t.successes, t.firstSuccess = s.Failures, s.Successes, s.FirstSuccess
+	t.firstFailure = check.Result{}
+	if s.FirstFailure != nil {
+		t.firstFailure = *s.FirstFailure
+	}
+	t.current = nil
+	if s.Current != nil && s.Current.Open() && s.Current.TargetID == t.targetID {
+		current := *s.Current
+		t.current = &current
+	}
+}
+
 // Resume continues an incident that was open before a restart, so a recovery closes it.
 func (t *Tracker) Resume(open Incident) {
 	if open.Open() && open.TargetID == t.targetID {

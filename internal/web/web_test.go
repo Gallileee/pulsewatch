@@ -6,6 +6,8 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -136,7 +138,7 @@ func TestPage(t *testing.T) {
 	for _, want := range []string{
 		"<title>Acme status</title>", "Partial outage", "Website &lt;b&gt;", "HTTP 503 &lt;oops&gt;",
 		`class="pill pill-down"`, "Ongoing", "Resolved", `class="bar bar-ok"`, "<path d=\"M0.0 ", "Not checked yet",
-		`<script src="/static/app.js" defer>`,
+		`<script src="static/app.js" defer>`, `data-mode="live"`, `href="api/status"`,
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("missing %q", want)
@@ -270,6 +272,37 @@ func TestMilliseconds(t *testing.T) {
 	for ms, want := range map[float64]string{0.02: "< 0.1 ms", 0.42: "0.4 ms", 12.4: "12 ms", 999: "999 ms", 1360: "1.36 s"} {
 		if got := Milliseconds(ms); got != want {
 			t.Errorf("%v: %q", ms, got)
+		}
+	}
+}
+
+func TestWriteSite(t *testing.T) {
+	s, _ := newServer(fixture())
+	dir := t.TempDir()
+	if err := s.WriteSite(dir); err != nil {
+		t.Fatal(err)
+	}
+	html, err := os.ReadFile(filepath.Join(dir, "index.html"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{`data-mode="static"`, `href="status.json"`, "Checked every few minutes", "Partial outage",
+		`<meta http-equiv="Content-Security-Policy"`} {
+		if !strings.Contains(string(html), want) {
+			t.Errorf("missing %q", want)
+		}
+	}
+	if strings.Contains(string(html), `href="metrics"`) || strings.Contains(string(html), `href="/`) {
+		t.Error("links to the server or to absolute paths")
+	}
+	var p Page
+	data, _ := os.ReadFile(filepath.Join(dir, "status.json"))
+	if err := json.Unmarshal(data, &p); err != nil || len(p.Targets) != 3 || p.Overall.Status != "partial" {
+		t.Errorf("status.json: %v %+v", err, p.Overall)
+	}
+	for _, asset := range []string{"app.js", "style.css", "favicon.svg"} {
+		if info, err := os.Stat(filepath.Join(dir, "static", asset)); err != nil || info.Size() == 0 {
+			t.Errorf("%s: %v", asset, err)
 		}
 	}
 }

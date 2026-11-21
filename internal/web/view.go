@@ -23,6 +23,8 @@ type Page struct {
 	Targets   []TargetView   `json:"targets"`
 	Incidents []IncidentView `json:"incidents"`
 	Generated time.Time      `json:"generated"`
+	// Static: written as files (no server for live updates, the JSON or the metrics).
+	Static bool `json:"-"`
 }
 
 // Overall is the banner at the top.

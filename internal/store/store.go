@@ -57,11 +57,27 @@ type Store struct {
 	mu        sync.RWMutex
 	series    map[string]*Series
 	incidents []incident.Incident // oldest first
+	trackers  map[string]incident.State
 }
 
 // New returns an empty store.
 func New() *Store {
-	return &Store{series: map[string]*Series{}}
+	return &Store{series: map[string]*Series{}, trackers: map[string]incident.State{}}
+}
+
+// SetTracker keeps a target's incident tracker state.
+func (s *Store) SetTracker(id string, state incident.State) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.trackers[id] = state
+}
+
+// Tracker is a target's saved incident tracker state.
+func (s *Store) Tracker(id string) (incident.State, bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	state, ok := s.trackers[id]
+	return state, ok
 }
 
 // Record adds a check.
@@ -236,21 +252,23 @@ func (s *Store) Forget(keep []string) {
 	for id := range s.series {
 		if !slices.Contains(keep, id) {
 			delete(s.series, id)
+			delete(s.trackers, id)
 		}
 	}
 }
 
 type file struct {
-	Version   int                 `json:"version"`
-	Series    map[string]*Series  `json:"series"`
-	Incidents []incident.Incident `json:"incidents"`
+	Version   int                       `json:"version"`
+	Series    map[string]*Series        `json:"series"`
+	Incidents []incident.Incident       `json:"incidents"`
+	Trackers  map[string]incident.State `json:"trackers,omitempty"`
 }
 
 // Save writes the store to path: to a temporary file first, then renamed, so a crash while
 // writing leaves the old file.
 func (s *Store) Save(path string) error {
 	s.mu.RLock()
-	data, err := json.Marshal(file{Version: fileVersion, Series: s.series, Incidents: s.incidents})
+	data, err := json.Marshal(file{Version: fileVersion, Series: s.series, Incidents: s.incidents, Trackers: s.trackers})
 	s.mu.RUnlock()
 	if err != nil {
 		return err
@@ -300,5 +318,8 @@ func Load(path string) (*Store, error) {
 		}
 	}
 	s.incidents = f.Incidents
+	for id, state := range f.Trackers {
+		s.trackers[id] = state
+	}
 	return s, nil
 }

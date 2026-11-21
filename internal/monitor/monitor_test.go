@@ -239,3 +239,39 @@ func waitFor(t *testing.T, ok func() bool) {
 		time.Sleep(time.Millisecond)
 	}
 }
+
+func TestRunOnceChecksEveryTargetOnce(t *testing.T) {
+	clk := clock.NewFake(t0)
+	a := &scripted{clk: clk, statuses: []check.Status{check.Up}}
+	b := &scripted{clk: clk, statuses: []check.Status{check.Down}}
+	mon, _, _ := setup(t, a, b)
+	mon.RunOnce(context.Background())
+	if a.count() != 1 || b.count() != 1 {
+		t.Errorf("a %d, b %d", a.count(), b.count())
+	}
+	if state, ok := mon.Store.Tracker("b"); !ok || state.Failures != 1 {
+		t.Errorf("tracker %+v", state)
+	}
+}
+
+func TestTheNextRunContinuesTheStreak(t *testing.T) {
+	clk := clock.NewFake(t0)
+	st := store.New()
+	cfg := &config.Config{MaxConcurrent: 1, Incidents: config.Incident{FailuresToOpen: 2, SuccessesToResolve: 1},
+		Targets: []config.Target{{ID: "a", Name: "A", Interval: config.Duration(time.Minute)}}}
+	run := func() *alerts {
+		sent := &alerts{}
+		mon := New(cfg, []check.Checker{&scripted{clk: clk, statuses: []check.Status{check.Down}}}, st,
+			metrics.New("test", []metrics.Target{{ID: "a"}}), sent, clk, nil)
+		mon.RunOnce(context.Background())
+		return sent
+	}
+	if sent := run(); len(sent.sent) != 0 {
+		t.Fatal("an alert after one failure")
+	}
+	clk.Advance(5 * time.Minute)
+	sent := run()
+	if len(sent.sent) != 1 || sent.sent[0].Kind != notify.KindDown || !sent.sent[0].Incident.Started.Equal(t0) {
+		t.Errorf("alerts %+v", sent.sent)
+	}
+}

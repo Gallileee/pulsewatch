@@ -50,8 +50,12 @@ func New(cfg *config.Config, checkers []check.Checker, st *store.Store, m *metri
 	}
 	for i, t := range cfg.Targets {
 		tracker := incident.NewTracker(t.ID, t.Name, cfg.Incidents.FailuresToOpen, cfg.Incidents.SuccessesToResolve)
-		if open, ok := st.OpenIncident(t.ID); ok {
+		if state, ok := st.Tracker(t.ID); ok {
+			tracker.Restore(state) // carry on: the failure streak, the open incident
+		} else if open, ok := st.OpenIncident(t.ID); ok {
 			tracker.Resume(open) // it was down when we stopped: a recovery should close it
+		}
+		if tracker.Current() != nil {
 			m.SetIncident(t.ID, true)
 		}
 		mon.Targets = append(mon.Targets, &Target{Config: t, Checker: checkers[i], tracker: tracker})
@@ -69,6 +73,20 @@ func (m *Monitor) Run(ctx context.Context) {
 		go func() {
 			defer wg.Done()
 			m.loop(ctx, t, offset)
+		}()
+	}
+	wg.Wait()
+}
+
+// RunOnce checks every target once (as many at a time as the limit allows) and returns when
+// all are done: for running from a scheduler such as cron or GitHub Actions.
+func (m *Monitor) RunOnce(ctx context.Context) {
+	var wg sync.WaitGroup
+	for _, t := range m.Targets {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			m.CheckOnce(ctx, t)
 		}()
 	}
 	wg.Wait()
@@ -111,6 +129,7 @@ func (m *Monitor) CheckOnce(ctx context.Context, t *Target) {
 		m.Log.Info("check", "target", t.Config.ID, "status", r.Status, "message", r.Message)
 	}
 	change := t.tracker.Observe(r)
+	m.Store.SetTracker(t.Config.ID, t.tracker.State())
 	switch {
 	case change.Opened != nil:
 		m.Store.SaveIncident(*change.Opened)

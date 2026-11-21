@@ -70,10 +70,15 @@ func run() error {
 	demoMode := flag.Bool("demo", false, "run a local demo service and watch it (ignores -config)")
 	listen := flag.String("listen", "", "the web server's address (overrides the config)")
 	showVersion := flag.Bool("version", false, "print the version")
+	once := flag.Bool("once", false, "check every target once, save the history and exit (for cron or GitHub Actions)")
+	siteDir := flag.String("site", "", "with -once: write the status page as static files into this directory")
 	flag.Parse()
 	if *showVersion {
 		fmt.Println("pulsewatch", version)
 		return nil
+	}
+	if *siteDir != "" && !*once {
+		return errors.New("-site works with -once (a running Pulsewatch serves the page itself)")
 	}
 	log := slog.New(slog.NewTextHandler(os.Stderr, nil))
 	check.UserAgent = fmt.Sprintf("pulsewatch/%s (+https://github.com/Gallileee/pulsewatch)", version)
@@ -141,6 +146,9 @@ func run() error {
 	site := &web.Server{
 		Title: cfg.Title, Targets: cfg.Targets, Store: st, Metrics: m, Broker: mon.Broker, Clock: clk, Log: log,
 	}
+	if *once {
+		return runOnce(mon, dispatcher, st, site, cfg.DataFile, *siteDir, log)
+	}
 	server := &http.Server{
 		Addr:              cfg.Listen,
 		Handler:           site.Handler(),
@@ -185,6 +193,36 @@ func run() error {
 			return fmt.Errorf("saving the history: %w", err)
 		}
 	}
+	return nil
+}
+
+// runOnce checks every target once, waits for the alerts, saves the history and writes the
+// static site. Targets being down isn't an error: the exit code says whether Pulsewatch ran.
+func runOnce(mon *monitor.Monitor, dispatcher *notify.Dispatcher, st *store.Store, site *web.Server, dataFile, siteDir string, log *slog.Logger) error {
+	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer cancel()
+	mon.RunOnce(ctx)
+	dispatcher.Wait()
+	if ctx.Err() != nil {
+		return errors.New("stopped before the checks finished; the history is left as it was")
+	}
+	if dataFile != "" {
+		if err := st.Save(dataFile); err != nil {
+			return fmt.Errorf("saving the history: %w", err)
+		}
+	}
+	if siteDir != "" {
+		if err := site.WriteSite(siteDir); err != nil {
+			return fmt.Errorf("writing the site: %w", err)
+		}
+	}
+	down := 0
+	for _, t := range mon.Targets {
+		if last, ok := st.Last(t.Config.ID); ok && last.Status == check.Down {
+			down++
+		}
+	}
+	log.Info("checked every target once", "targets", len(mon.Targets), "down", down, "site", siteDir)
 	return nil
 }
 
