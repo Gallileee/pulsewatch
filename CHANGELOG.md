@@ -1,6 +1,14 @@
 # Changelog
 
-## v0.2.0 — free hosting: `-once` and a static status page
+## v0.3.0 — status badges
+
+- `/badge/<id>.json` (and `badge/<id>.json` in a static site) gives each target's status in
+  the [Shields.io endpoint badge](https://shields.io/badges/endpoint-badge) format: the status
+  and its 7-day uptime, for example "operational · 100 % (7 d)", coloured green, yellow, red,
+  or grey before the first check. A README can show it as a badge that follows the target's
+  status.
+
+## v0.2.0 — free hosting: `-once` and a static status page (2026-11-21)
 
 ### Run once, publish a static page
 

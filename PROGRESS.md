@@ -1,5 +1,21 @@
 # Progress log
 
+## 2026-11-21 (interactive, user picked "Odkaz z ostatních README"): status badges
+
+Why: linking the status page from the projects it watches. Shields.io's dynamic JSON badge
+can't filter `status.json` by target ID ("query not supported"), and an index would break when
+the targets change, so Pulsewatch writes a badge file per target.
+
+Done:
+- `web.BadgeFor` and `/badge/{id}.json` (CORS open, cached a minute); `WriteSite` writes
+  `badge/<id>.json` for every target.
+- Tests: the badge for each status, the route (unknown ID, no `.json` → 404), the files in a
+  static site.
+- README (badge example), CHANGELOG v0.3.0, v0.2.0 heading dated.
+- Then: the Market Pulse README links its status badge and the status page (a PR there).
+
+Verified locally: `go vet`, `gofmt`, `go test ./...` clean and passing.
+
 ## 2026-11-21 (interactive, user picked "Nasazení Pulsewatch", then free hosting on GitHub Actions + Pages)
 
 Why: next step 1. Always-on free hosts sleep (Render, Koyeb) or need a card (Fly.io now has
@@ -83,10 +99,8 @@ Verified locally:
 
 ## Next steps (in order)
 
-1. After the merge: set Pages to "GitHub Actions", run the workflow by hand, check the live
-   page and that the second run picks up the first run's history.
-2. Email alerts (SMTP with STARTTLS, settings from the environment) next to the webhooks, and
+1. Email alerts (SMTP with STARTTLS, settings from the environment) next to the webhooks, and
    a Discord alert from the Actions run (a repository secret).
-3. A Grafana dashboard (JSON, provisioned in the Compose file) on the Prometheus metrics.
-4. Maintenance windows: planned downtime that opens no incident and shows on the page.
-5. Reload the config on SIGHUP without losing the history or the open incidents.
+2. A Grafana dashboard (JSON, provisioned in the Compose file) on the Prometheus metrics.
+3. Maintenance windows: planned downtime that opens no incident and shows on the page.
+4. Reload the config on SIGHUP without losing the history or the open incidents.
