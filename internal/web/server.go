@@ -3,6 +3,7 @@
 package web
 
 import (
+	"bytes"
 	"embed"
 	"encoding/json"
 	"fmt"
@@ -10,6 +11,8 @@ import (
 	"io/fs"
 	"log/slog"
 	"net/http"
+	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/Gallileee/pulsewatch/internal/clock"
@@ -43,13 +46,7 @@ type Server struct {
 
 // Handler returns the routes.
 func (s *Server) Handler() http.Handler {
-	s.tmpl = template.Must(template.New("").Funcs(template.FuncMap{
-		"percent":  Percent,
-		"duration": notify.Duration,
-		"iso":      func(t time.Time) string { return t.UTC().Format(time.RFC3339) },
-		"clock":    func(t time.Time) string { return t.UTC().Format("2 Jan 2006, 15:04 UTC") },
-		"ms":       Milliseconds,
-	}).ParseFS(templateFiles, "templates/*.html"))
+	s.parse()
 	static, _ := fs.Sub(staticFiles, "static")
 
 	mux := http.NewServeMux()
@@ -64,6 +61,56 @@ func (s *Server) Handler() http.Handler {
 	})
 	mux.Handle("GET /static/", http.StripPrefix("/static/", http.FileServerFS(static)))
 	return securityHeaders(mux)
+}
+
+// WriteSite writes the status page as static files into dir: index.html, status.json and the
+// static/ assets, for hosting without Pulsewatch running (GitHub Pages, any web server).
+func (s *Server) WriteSite(dir string) error {
+	s.parse()
+	page := s.build()
+	page.Static = true
+	if err := os.MkdirAll(filepath.Join(dir, "static"), 0o755); err != nil {
+		return err
+	}
+	var html bytes.Buffer
+	if err := s.tmpl.ExecuteTemplate(&html, "index.html", page); err != nil {
+		return err
+	}
+	data, err := json.MarshalIndent(page, "", "  ")
+	if err != nil {
+		return err
+	}
+	files := map[string][]byte{"index.html": html.Bytes(), "status.json": append(data, '\n')}
+	assets, _ := fs.Sub(staticFiles, "static")
+	if err := fs.WalkDir(assets, ".", func(path string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return err
+		}
+		content, err := fs.ReadFile(assets, path)
+		files[filepath.Join("static", path)] = content
+		return err
+	}); err != nil {
+		return err
+	}
+	for name, content := range files {
+		if err := os.WriteFile(filepath.Join(dir, name), content, 0o644); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (s *Server) parse() {
+	if s.tmpl != nil {
+		return
+	}
+	s.tmpl = template.Must(template.New("").Funcs(template.FuncMap{
+		"percent":  Percent,
+		"duration": notify.Duration,
+		"iso":      func(t time.Time) string { return t.UTC().Format(time.RFC3339) },
+		"clock":    func(t time.Time) string { return t.UTC().Format("2 Jan 2006, 15:04 UTC") },
+		"ms":       Milliseconds,
+	}).ParseFS(templateFiles, "templates/*.html"))
 }
 
 func (s *Server) build() Page {

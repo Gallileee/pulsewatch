@@ -1,0 +1,34 @@
+# The live status page at https://gallileee.github.io/pulsewatch/
+# Run by .github/workflows/status.yml every 5 minutes: `pulsewatch -once -site site`.
+# Each run checks every target once, so `interval` only documents how often that is.
+
+title: Gallileee status
+data_file: history.json
+public_url: https://gallileee.github.io/pulsewatch/
+
+incidents:
+  failures_to_open: 2       # two runs in a row (about 10 minutes)
+  successes_to_resolve: 1
+
+targets:
+  - name: Market Pulse
+    url: https://gallileee.github.io/market-pulse/
+    interval: 5m
+    expect_body: Market Pulse
+    degraded_after: 3s
+
+  - name: GitHub Pages certificate
+    type: tls
+    host: gallileee.github.io
+    interval: 5m
+    warn_days: 14
+
+  - name: GitHub Pages DNS
+    type: dns
+    host: gallileee.github.io
+    interval: 5m
+
+  - name: GitHub
+    url: https://github.com/Gallileee
+    interval: 5m
+    degraded_after: 3s

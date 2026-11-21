@@ -1,5 +1,43 @@
 # Progress log
 
+## 2026-11-21 (interactive, user picked "Nasazení Pulsewatch", then free hosting on GitHub Actions + Pages)
+
+Why: next step 1. Always-on free hosts sleep (Render, Koyeb) or need a card (Fly.io now has
+only a short trial; Oracle's free VMs). The user chose GitHub Actions + Pages: no server, no
+cost, no live stream.
+
+Acceptance criteria:
+- `-once`: every target checked once, alerts waited for, history saved, exit 0 even with
+  targets down; nothing saved if interrupted.
+- `-site DIR`: a static page (relative links, CSP in a meta tag, reloads itself every minute)
+  plus `status.json` and the assets.
+- Incident streaks survive between runs (and restarts): saved in the history file.
+- A scheduled workflow that carries the history between runs and deploys to Pages; checked
+  by workflow-guard.
+
+Done:
+- `incident.State` with `State()`/`Restore()`; the store saves it per target; the monitor
+  restores it (falling back to the open incident for older files) and saves it after every
+  check; `Monitor.RunOnce`.
+- `web.Server.WriteSite`; the template's static mode; `app.js` polls the page itself in
+  static mode; relative URLs everywhere.
+- `deploy/status.yaml` and `.github/workflows/status.yml` (history as an artifact from the
+  newest earlier run that has one, kept 3 days; `upload-pages-artifact` + `deploy-pages`).
+- Tests: tracker state across trackers, trackers saved/forgotten, `RunOnce`, a streak across
+  two runs, the static site's files and links; 77 tests in total.
+- README (free hosting section, live link), CHANGELOG v0.2.0, v0.1.0 heading dated.
+
+Verified locally:
+- `go vet`, `gofmt`, `go test ./...`: clean, all pass.
+- `pulsewatch -once` twice against a dead local port: the second run opened the incident
+  (`failures: 2`, "Ongoing" on the page); the static site has `data-mode="static"` and links
+  `status.json`.
+- `deploy/status.yaml` run once: all 4 targets up (certificate valid 38 more days).
+- workflow-guard on both workflows: 0 findings.
+
+Not verified locally: the workflow itself (artifacts, Pages deploy) runs only on GitHub. Pages
+has to be switched to "GitHub Actions" in the repository settings before the first deploy.
+
 ## 2026-11-21 (interactive, user picked "Pulsewatch"): milestone 1
 
 Why: the portfolio had a React frontend (fitness-workout-log, market-pulse), a Java backend
@@ -45,9 +83,10 @@ Verified locally:
 
 ## Next steps (in order)
 
-1. Deploy it: a small VM or Fly.io with the Docker image, watching the portfolio's demos, and
-   link the live status page from the README.
-2. Email alerts (SMTP with STARTTLS, settings from the environment) next to the webhooks.
+1. After the merge: set Pages to "GitHub Actions", run the workflow by hand, check the live
+   page and that the second run picks up the first run's history.
+2. Email alerts (SMTP with STARTTLS, settings from the environment) next to the webhooks, and
+   a Discord alert from the Actions run (a repository secret).
 3. A Grafana dashboard (JSON, provisioned in the Compose file) on the Prometheus metrics.
 4. Maintenance windows: planned downtime that opens no incident and shows on the page.
 5. Reload the config on SIGHUP without losing the history or the open incidents.

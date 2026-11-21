@@ -1,12 +1,14 @@
 // Live updates: the server sends an event after every check; the page then fetches the
-// rendered live part again (at most once a second) and swaps it in. Without JavaScript the
-// page still works, it just doesn't update itself.
+// rendered live part again (at most once a second) and swaps it in. A static page (pulsewatch
+// -once -site, e.g. on GitHub Pages) has no server: it fetches itself again every minute.
+// Without JavaScript the page still works, it just doesn't update itself.
 (() => {
   "use strict";
 
   const live = document.getElementById("live");
   const state = document.getElementById("live-state");
   const MIN_GAP = 1000;
+  const STATIC = document.body.dataset.mode === "static";
   let last = 0;
   let timer = null;
   let loading = false;
@@ -25,9 +27,15 @@
     loading = true;
     last = Date.now();
     try {
-      const response = await fetch("/partials/live", { cache: "no-store" });
+      const response = await fetch(STATIC ? location.pathname : "partials/live", { cache: "no-store" });
       if (response.ok) {
-        live.innerHTML = await response.text();
+        const html = await response.text();
+        if (STATIC) {
+          const fresh = new DOMParser().parseFromString(html, "text/html").getElementById("live");
+          if (fresh) live.innerHTML = fresh.innerHTML;
+        } else {
+          live.innerHTML = html;
+        }
         relativeTimes();
       }
     } catch {
@@ -65,8 +73,12 @@
   relativeTimes();
   setInterval(relativeTimes, 5000);
 
+  if (STATIC) {
+    setInterval(refresh, 60000);
+    return;
+  }
   if (!("EventSource" in window)) return;
-  const events = new EventSource("/api/events");
+  const events = new EventSource("api/events");
   events.addEventListener("open", () => setState(true, "Live"));
   events.addEventListener("error", () => setState(false, "Reconnecting…"));
   events.addEventListener("check", schedule);

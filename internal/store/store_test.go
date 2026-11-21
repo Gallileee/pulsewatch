@@ -202,3 +202,26 @@ func TestLoadRejectsBadFiles(t *testing.T) {
 		}
 	}
 }
+
+func TestTrackersAreSavedAndForgotten(t *testing.T) {
+	s := New()
+	first := res(t0, check.Down, 1)
+	s.Record(first)
+	s.SetTracker("web", incident.State{Failures: 1, FirstFailure: &first})
+	path := filepath.Join(t.TempDir(), "h.json")
+	if err := s.Save(path); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	state, ok := loaded.Tracker("web")
+	if !ok || state.Failures != 1 || state.FirstFailure == nil || !state.FirstFailure.At.Equal(t0) {
+		t.Errorf("%+v", state)
+	}
+	loaded.Forget(nil)
+	if _, ok := loaded.Tracker("web"); ok {
+		t.Error("kept the tracker of a removed target")
+	}
+}

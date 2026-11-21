@@ -1,0 +1,75 @@
+# The live status page: every 5 minutes, check the targets in deploy/status.yaml once and
+# publish the page to GitHub Pages. The history is carried from run to run as an artifact.
+name: Status page
+
+on:
+  schedule:
+    - cron: "*/5 * * * *"
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - deploy/**
+      - cmd/**
+      - internal/**
+      - go.mod
+      - .github/workflows/status.yml
+
+permissions:
+  contents: read
+
+# One run at a time, none cancelled: each one reads the history the last one saved.
+concurrency:
+  group: status-page
+  cancel-in-progress: false
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read # to download the last run's history
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5  # v7.1.0
+        with:
+          go-version-file: go.mod
+      - run: go build -ldflags "-X main.version=${GITHUB_SHA::7}" -o pulsewatch ./cmd/pulsewatch
+      - name: Restore the history
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # The newest earlier run that saved one (a run that failed before saving has none).
+          for id in $(gh run list --repo "$GITHUB_REPOSITORY" --workflow status.yml --limit 20 \
+                        --json databaseId --jq ".[].databaseId | select(. != $GITHUB_RUN_ID)"); do
+            if gh run download "$id" --repo "$GITHUB_REPOSITORY" --name history --dir . 2>/dev/null; then
+              echo "History from run $id."
+              exit 0
+            fi
+          done
+          echo "::warning::No saved history found: starting a fresh one."
+      - run: ./pulsewatch -once -config deploy/status.yaml -site site
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
+        with:
+          name: history
+          path: history.json
+          if-no-files-found: error
+          retention-days: 3
+      - uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9  # v5.0.0
+        with:
+          path: site
+
+  deploy:
+    needs: check
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346  # v5.0.1
