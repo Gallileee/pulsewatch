@@ -1,0 +1,13 @@
+global:
+  scrape_interval: 30s
+
+scrape_configs:
+  - job_name: pulsewatch
+    static_configs:
+      - targets: ["pulsewatch:8080"]
+
+# Example alerting rules (load them with rule_files):
+#   - alert: TargetDown
+#     expr: pulsewatch_incident_open == 1
+#   - alert: CertificateExpiresSoon
+#     expr: pulsewatch_tls_cert_expiry_timestamp_seconds - time() < 14 * 86400

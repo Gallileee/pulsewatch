@@ -1,0 +1,6 @@
+.git
+.github
+bin
+*.md
+pulsewatch-data.json*
+.env

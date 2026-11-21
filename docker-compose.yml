@@ -1,0 +1,28 @@
+# Pulsewatch with Prometheus scraping its metrics.
+#   docker compose up --build
+#   status page: http://localhost:8080   Prometheus: http://localhost:9090
+services:
+  pulsewatch:
+    build: .
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./examples/pulsewatch.yaml:/etc/pulsewatch/pulsewatch.yaml:ro
+      - pulsewatch-data:/data
+    environment:
+      # Set it in a .env file next to this one (not committed) to get alerts.
+      DISCORD_WEBHOOK_URL: ${DISCORD_WEBHOOK_URL:-}
+    restart: unless-stopped
+
+  prometheus:
+    image: prom/prometheus:v3.1.0
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./examples/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    depends_on:
+      - pulsewatch
+    restart: unless-stopped
+
+volumes:
+  pulsewatch-data:
