@@ -36,12 +36,14 @@ var Heartbeat = 25 * time.Second
 type Server struct {
 	Title   string
 	Targets []config.Target
-	Store   *store.Store
-	Metrics *metrics.Metrics
-	Broker  *monitor.Broker
-	Clock   clock.Clock
-	Log     *slog.Logger
-	tmpl    *template.Template
+	// Maintenance is the planned downtime shown on the page.
+	Maintenance []config.Maintenance
+	Store       *store.Store
+	Metrics     *metrics.Metrics
+	Broker      *monitor.Broker
+	Clock       clock.Clock
+	Log         *slog.Logger
+	tmpl        *template.Template
 }
 
 // Handler returns the routes.
@@ -125,7 +127,7 @@ func (s *Server) parse() {
 }
 
 func (s *Server) build() Page {
-	return Build(s.Title, s.Targets, s.Store, s.Clock.Now())
+	return Build(s.Title, s.Targets, s.Maintenance, s.Store, s.Clock.Now())
 }
 
 func (s *Server) page(name string) http.HandlerFunc {

@@ -34,6 +34,24 @@ const (
 // MinInterval is the shortest interval between two checks of one target.
 const MinInterval = 5 * time.Second
 
+// MaxMaintenance is the longest a maintenance window may last: a window that never ends would
+// hide real outages for good.
+const MaxMaintenance = 7 * 24 * time.Hour
+
+// Time is a moment written in RFC 3339 with a time zone, such as 2026-11-24T22:00:00Z or
+// 2026-11-24T23:00:00+01:00.
+type Time struct{ time.Time }
+
+// UnmarshalYAML reads an RFC 3339 time; one without a zone is an error, not a guess.
+func (t *Time) UnmarshalYAML(node *yaml.Node) error {
+	parsed, err := time.Parse(time.RFC3339, node.Value)
+	if node.Kind != yaml.ScalarNode || err != nil {
+		return fmt.Errorf("line %d: %q isn't a time like 2026-11-24T22:00:00Z (RFC 3339, with a zone)", node.Line, node.Value)
+	}
+	t.Time = parsed
+	return nil
+}
+
 // Duration is a time.Duration written as "30s", "5m" or "1h30m" in YAML.
 type Duration time.Duration
 
@@ -66,6 +84,43 @@ type Config struct {
 	Incidents Incident `yaml:"incidents"`
 	Alerts    []Alert  `yaml:"alerts"`
 	Targets   []Target `yaml:"targets"`
+	// Maintenance lists planned downtime.
+	Maintenance []Maintenance `yaml:"maintenance"`
+}
+
+// Maintenance is planned downtime. While it lasts, a failed check of a target it covers opens
+// no incident, sends no alert and doesn't count against the uptime; the status page shows it
+// from when it's announced (in the config) until it ends.
+type Maintenance struct {
+	Title string `yaml:"title"`
+	Start Time   `yaml:"start"`
+	End   Time   `yaml:"end"`
+	// Targets are the names of the targets it covers; empty covers all of them.
+	Targets []string `yaml:"targets"`
+	// Note says more on the status page (what changes, whom to ask).
+	Note string `yaml:"note"`
+	// TargetIDs are the covered targets' IDs, filled in from Targets.
+	TargetIDs []string `yaml:"-"`
+}
+
+// Active reports whether the window is going on at t: from Start up to, not including, End.
+func (w Maintenance) Active(t time.Time) bool {
+	return !t.Before(w.Start.Time) && t.Before(w.End.Time)
+}
+
+// Covers reports whether the window includes the target.
+func (w Maintenance) Covers(id string) bool {
+	return len(w.TargetIDs) == 0 || slices.Contains(w.TargetIDs, id)
+}
+
+// InMaintenance is the first window that covers the target at t, if any.
+func InMaintenance(windows []Maintenance, id string, t time.Time) (Maintenance, bool) {
+	for _, w := range windows {
+		if w.Active(t) && w.Covers(id) {
+			return w, true
+		}
+	}
+	return Maintenance{}, false
 }
 
 // Incident sets when an outage starts and ends.
@@ -166,6 +221,10 @@ func (c *Config) expand() error {
 			replace(s)
 		}
 	}
+	for i := range c.Maintenance {
+		replace(&c.Maintenance[i].Title)
+		replace(&c.Maintenance[i].Note)
+	}
 	if len(missing) > 0 {
 		return fmt.Errorf("environment variables not set: %s", strings.Join(missing, ", "))
 	}
@@ -207,6 +266,13 @@ func (c *Config) defaults() {
 		}
 		if t.Type == TypeTLS && t.WarnDays == 0 {
 			t.WarnDays = 14
+		}
+	}
+	for i := range c.Maintenance {
+		w := &c.Maintenance[i]
+		w.TargetIDs = nil
+		for _, name := range w.Targets {
+			w.TargetIDs = append(w.TargetIDs, Slug(name))
 		}
 	}
 }
@@ -292,6 +358,27 @@ func (c *Config) validate() error {
 		}
 		if t.Type != TypeHTTP && (t.URL != "" || len(t.ExpectStatus) > 0 || t.ExpectBody != "" || t.DegradedAfter != 0) {
 			add("%s: url, expect_status, expect_body and degraded_after are for http targets", where)
+		}
+	}
+	for i, w := range c.Maintenance {
+		where := fmt.Sprintf("maintenance[%d]", i)
+		if w.Title != "" {
+			where = fmt.Sprintf("maintenance %q", w.Title)
+		} else {
+			add("%s: needs a title (it's shown on the status page)", where)
+		}
+		switch {
+		case w.Start.IsZero() || w.End.IsZero():
+			add("%s: needs a start and an end", where)
+		case !w.End.After(w.Start.Time):
+			add("%s: end must be after start", where)
+		case w.End.Sub(w.Start.Time) > MaxMaintenance:
+			add("%s: lasts longer than %s; split it, or fix what needs that long", where, "7 days")
+		}
+		for j, id := range w.TargetIDs {
+			if !seen[id] {
+				add("%s: no target named %q", where, w.Targets[j])
+			}
 		}
 	}
 	return errors.Join(errs...)

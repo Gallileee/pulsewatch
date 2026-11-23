@@ -22,15 +22,16 @@ type Target struct {
 }
 
 type series struct {
-	target     Target
-	up         float64
-	degraded   float64
-	checks     map[check.Status]uint64
-	buckets    []uint64 // per bound, not cumulative
-	sum        float64
-	count      uint64
-	open       float64
-	certExpiry float64
+	target      Target
+	up          float64
+	degraded    float64
+	checks      map[check.Status]uint64
+	buckets     []uint64 // per bound, not cumulative
+	sum         float64
+	count       uint64
+	open        float64
+	maintenance float64
+	certExpiry  float64
 }
 
 // Metrics holds the counters of every target.
@@ -59,7 +60,7 @@ func (m *Metrics) Observe(r check.Result) {
 	if s == nil {
 		return
 	}
-	s.up = boolValue(r.Status != check.Down)
+	s.up = boolValue(r.Status == check.Up || r.Status == check.Degraded)
 	s.degraded = boolValue(r.Status == check.Degraded)
 	s.checks[r.Status]++
 	seconds := r.Latency.Seconds()
@@ -70,6 +71,15 @@ func (m *Metrics) Observe(r check.Result) {
 	s.count++
 	if r.CertExpiry != nil {
 		s.certExpiry = float64(r.CertExpiry.Unix())
+	}
+}
+
+// SetMaintenance records whether the target is in a maintenance window.
+func (m *Metrics) SetMaintenance(id string, on bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if s := m.targets[id]; s != nil {
+		s.maintenance = boolValue(on)
 	}
 }
 
@@ -93,7 +103,7 @@ func (m *Metrics) WriteTo(w io.Writer) (int64, error) {
 	header("pulsewatch_build_info", "gauge", "The running version.")
 	fmt.Fprintf(&b, "pulsewatch_build_info{version=%s} 1\n", quote(m.version))
 
-	header("pulsewatch_up", "gauge", "1 if the latest check was up or degraded, 0 if it was down.")
+	header("pulsewatch_up", "gauge", "1 if the latest check was up or degraded, 0 if it failed (also during maintenance).")
 	m.each(func(s *series, l string) { fmt.Fprintf(&b, "pulsewatch_up{%s} %s\n", l, num(s.up)) }, true)
 
 	header("pulsewatch_degraded", "gauge", "1 if the latest check was degraded (slow, or a certificate about to expire).")
@@ -101,7 +111,7 @@ func (m *Metrics) WriteTo(w io.Writer) (int64, error) {
 
 	header("pulsewatch_checks_total", "counter", "Checks since the start, by status.")
 	m.each(func(s *series, l string) {
-		for _, status := range []check.Status{check.Up, check.Degraded, check.Down} {
+		for _, status := range []check.Status{check.Up, check.Degraded, check.Down, check.Maintenance} {
 			fmt.Fprintf(&b, "pulsewatch_checks_total{%s,status=%q} %d\n", l, status, s.checks[status])
 		}
 	}, false)
@@ -117,6 +127,9 @@ func (m *Metrics) WriteTo(w io.Writer) (int64, error) {
 		fmt.Fprintf(&b, "pulsewatch_check_duration_seconds_sum{%s} %s\n", l, num(s.sum))
 		fmt.Fprintf(&b, "pulsewatch_check_duration_seconds_count{%s} %d\n", l, s.count)
 	}, false)
+
+	header("pulsewatch_maintenance", "gauge", "1 while the target is in a planned maintenance window (as of its latest check).")
+	m.each(func(s *series, l string) { fmt.Fprintf(&b, "pulsewatch_maintenance{%s} %s\n", l, num(s.maintenance)) }, false)
 
 	header("pulsewatch_incident_open", "gauge", "1 while the target has an open incident.")
 	m.each(func(s *series, l string) { fmt.Fprintf(&b, "pulsewatch_incident_open{%s} %s\n", l, num(s.open)) }, false)

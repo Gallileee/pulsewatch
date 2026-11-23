@@ -1,5 +1,43 @@
 # Progress log
 
+## 2026-11-23 (scheduled run): maintenance windows
+
+Why: next step 3, and the one with the most to learn: it touches every layer (config, monitor,
+store, metrics, page) and has real decisions in it. Hosted monitors agree on the behaviour:
+alerts held, planned downtime left out of uptime, the window shown on the status page
+(Checkly, Uptime.com, incident.io docs). Email alerts (step 1) need a mail account and a
+repository secret, which a scheduled run shouldn't set up alone.
+
+Acceptance criteria:
+- `maintenance:` entries with a title, RFC 3339 start/end with a zone, optional targets and a
+  note; validated (zone, end after start, at most 7 days, known targets), all errors at once.
+- A failed check of a covered target inside a window is `maintenance`: no incident, no alert,
+  not in the uptime; the tracker doesn't see it. Good checks count as usual.
+- The page lists active and announced windows, marks covered targets and the daily bars,
+  shows "Maintenance in progress"; a blue badge; `pulsewatch_maintenance` metric.
+- The demo shows it.
+
+Done:
+- `config.Maintenance`, `config.Time` (strict RFC 3339), `InMaintenance`; `check.Maintenance`;
+  `Monitor.Maintenance`; `Hour.Maintenance`/`Day.Maintenance` in the store (saved with the
+  history, older files read fine); `Metrics.SetMaintenance`; `web.MaintenanceView`, `span`,
+  the template section and target note, CSS tokens `--maint`/`--maint-soft` for both themes.
+- A target whose last check was `maintenance` but whose window has ended shows as down until
+  the next check.
+- 15 new tests (92 in total). Hand-made mutants: 8 of 9 caught, the other is equivalent (the
+  `maintenance` case in `overall` can't be reached when something is down).
+- README, CHANGELOG v0.4.0 (v0.3.0 heading dated), example config.
+
+Verified locally:
+- `go vet`, `gofmt -l`: clean; `go test ./...`: all pass.
+- `pulsewatch -demo` in the browser: "Scheduled maintenance" with "In progress" and
+  "Scheduled"; Payments failed twice during its window, recorded as `maintenance`, no
+  incident (only the Reports outage opened one); the Payments note with the end time;
+  `/metrics` had `pulsewatch_maintenance{target="payments"} 1`; dark desktop and light 375 px
+  with no sideways scrolling; no console errors.
+
+Not verified: the GitHub Pages deployment with a window in `deploy/status.yaml` (none planned).
+
 ## 2026-11-21 (interactive, user picked "Odkaz z ostatních README"): status badges
 
 Why: linking the status page from the projects it watches. Shields.io's dynamic JSON badge
@@ -102,5 +140,7 @@ Verified locally:
 1. Email alerts (SMTP with STARTTLS, settings from the environment) next to the webhooks, and
    a Discord alert from the Actions run (a repository secret).
 2. A Grafana dashboard (JSON, provisioned in the Compose file) on the Prometheus metrics.
-3. Maintenance windows: planned downtime that opens no incident and shows on the page.
-4. Reload the config on SIGHUP without losing the history or the open incidents.
+3. Reload the config on SIGHUP without losing the history or the open incidents (useful now
+   that maintenance windows live in the config).
+4. Past maintenance in the history list (Checkly shows completed windows next to incidents),
+   and an iCalendar feed (`maintenance.ics`) of announced windows.

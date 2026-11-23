@@ -1,8 +1,10 @@
 package web
 
 import (
+	"cmp"
 	"fmt"
 	"math"
+	"slices"
 	"strings"
 	"time"
 
@@ -18,35 +20,40 @@ const DaysShown = 90
 
 // Page is what the status page shows.
 type Page struct {
-	Title     string         `json:"title"`
-	Overall   Overall        `json:"overall"`
-	Targets   []TargetView   `json:"targets"`
-	Incidents []IncidentView `json:"incidents"`
-	Generated time.Time      `json:"generated"`
+	Title   string       `json:"title"`
+	Overall Overall      `json:"overall"`
+	Targets []TargetView `json:"targets"`
+	// Maintenance is the planned downtime going on now and announced for later.
+	Maintenance []MaintenanceView `json:"maintenance"`
+	Incidents   []IncidentView    `json:"incidents"`
+	Generated   time.Time         `json:"generated"`
 	// Static: written as files (no server for live updates, the JSON or the metrics).
 	Static bool `json:"-"`
 }
 
 // Overall is the banner at the top.
 type Overall struct {
-	Status string `json:"status"` // up, degraded, partial, major, unknown
+	Status string `json:"status"` // up, degraded, maintenance, partial, major, unknown
 	Text   string `json:"text"`
 }
 
 // TargetView is one target's card.
 type TargetView struct {
-	ID          string    `json:"id"`
-	Name        string    `json:"name"`
-	Type        string    `json:"type"`
-	Status      string    `json:"status"` // up, degraded, down, unknown
-	StatusText  string    `json:"status_text"`
-	Message     string    `json:"message,omitempty"`
-	LastChecked time.Time `json:"last_checked,omitzero"`
-	LatencyMs   float64   `json:"latency_ms"`
-	Uptime24h   float64   `json:"uptime_24h"` // a share; -1 with no data
-	Uptime7d    float64   `json:"uptime_7d"`
-	Uptime90d   float64   `json:"uptime_90d"`
-	Days        []DayView `json:"days"`
+	ID         string `json:"id"`
+	Name       string `json:"name"`
+	Type       string `json:"type"`
+	Status     string `json:"status"` // up, degraded, maintenance, down, unknown
+	StatusText string `json:"status_text"`
+	Message    string `json:"message,omitempty"`
+	// Maintenance is the title of the maintenance going on for it now, MaintenanceEnd its end.
+	Maintenance    string    `json:"maintenance,omitempty"`
+	MaintenanceEnd time.Time `json:"maintenance_end,omitzero"`
+	LastChecked    time.Time `json:"last_checked,omitzero"`
+	LatencyMs      float64   `json:"latency_ms"`
+	Uptime24h      float64   `json:"uptime_24h"` // a share; -1 with no data
+	Uptime7d       float64   `json:"uptime_7d"`
+	Uptime90d      float64   `json:"uptime_90d"`
+	Days           []DayView `json:"days"`
 	// Spark is the SVG path of the recent latencies, Spark max their highest (ms).
 	Spark    string        `json:"-"`
 	SparkMax float64       `json:"-"`
@@ -58,8 +65,22 @@ type DayView struct {
 	Date   string  `json:"date"`
 	Uptime float64 `json:"uptime"` // -1 with no data
 	Checks int     `json:"checks"`
-	Class  string  `json:"-"` // ok, minor, partial, major, none
-	Label  string  `json:"-"`
+	// Maintenance is the failed checks during planned maintenance (not in Checks or Uptime).
+	Maintenance int    `json:"maintenance,omitempty"`
+	Class       string `json:"-"` // ok, minor, partial, major, maintenance, none
+	Label       string `json:"-"`
+}
+
+// MaintenanceView is one maintenance window on the page.
+type MaintenanceView struct {
+	Title string    `json:"title"`
+	Note  string    `json:"note,omitempty"`
+	Start time.Time `json:"start"`
+	End   time.Time `json:"end"`
+	// Targets are the names of the covered targets; empty means all of them.
+	Targets []string `json:"targets"`
+	Active  bool     `json:"active"`
+	When    string   `json:"-"`
 }
 
 // IncidentView is one line of the incident history.
@@ -68,9 +89,9 @@ type IncidentView struct {
 	DurationText string `json:"duration"`
 }
 
-// Build makes the page from the targets' history.
-func Build(title string, targets []config.Target, st *store.Store, now time.Time) Page {
-	p := Page{Title: title, Generated: now}
+// Build makes the page from the targets' history and the maintenance windows.
+func Build(title string, targets []config.Target, windows []config.Maintenance, st *store.Store, now time.Time) Page {
+	p := Page{Title: title, Generated: now, Maintenance: maintenanceViews(windows, targets, now)}
 	counts := map[string]int{}
 	for _, t := range targets {
 		v := TargetView{ID: t.ID, Name: t.Name, Type: t.Type, Status: "unknown", StatusText: "Not checked yet"}
@@ -80,6 +101,12 @@ func Build(title string, targets []config.Target, st *store.Store, now time.Time
 			v.Message = last.Message
 			v.LastChecked = last.At
 			v.LatencyMs = round(float64(last.Latency)/float64(time.Millisecond), 1)
+		}
+		if w, ok := config.InMaintenance(windows, t.ID, now); ok {
+			v.Maintenance, v.MaintenanceEnd = w.Title, w.End.Time
+		} else if v.Status == string(check.Maintenance) {
+			// It failed during a window that has ended since: down until a check says otherwise.
+			v.Status, v.StatusText = string(check.Down), statusText(check.Down)
 		}
 		counts[v.Status]++
 		v.Uptime24h, _ = st.Uptime(t.ID, 24*time.Hour, now)
@@ -107,8 +134,51 @@ func statusText(s check.Status) string {
 		return "Degraded"
 	case check.Down:
 		return "Down"
+	case check.Maintenance:
+		return "Under maintenance"
 	}
 	return "Unknown"
+}
+
+// maintenanceViews lists the windows going on at now (first) and those still to come, by start.
+// Windows that have ended aren't listed: the uptime bars mark the days they touched.
+func maintenanceViews(windows []config.Maintenance, targets []config.Target, now time.Time) []MaintenanceView {
+	names := map[string]string{}
+	for _, t := range targets {
+		names[t.ID] = t.Name
+	}
+	out := []MaintenanceView{}
+	for _, w := range windows {
+		if !now.Before(w.End.Time) {
+			continue
+		}
+		v := MaintenanceView{Title: w.Title, Note: w.Note, Start: w.Start.Time, End: w.End.Time,
+			Targets: []string{}, Active: w.Active(now), When: span(w.Start.Time, w.End.Time)}
+		for _, id := range w.TargetIDs {
+			v.Targets = append(v.Targets, cmp.Or(names[id], id))
+		}
+		out = append(out, v)
+	}
+	slices.SortStableFunc(out, func(a, b MaintenanceView) int {
+		if a.Active != b.Active {
+			if a.Active {
+				return -1
+			}
+			return 1
+		}
+		return a.Start.Compare(b.Start)
+	})
+	return out
+}
+
+// span writes a time range in UTC: "24 Nov 2026, 22:00–23:30 UTC" within a day, otherwise
+// "24 Nov 2026, 22:00 UTC – 25 Nov 2026, 02:00 UTC".
+func span(start, end time.Time) string {
+	start, end = start.UTC(), end.UTC()
+	if y, m, d := start.Date(); end.Year() == y && end.Month() == m && end.Day() == d {
+		return start.Format("2 Jan 2006, 15:04") + "–" + end.Format("15:04") + " UTC"
+	}
+	return start.Format("2 Jan 2006, 15:04 UTC") + " – " + end.Format("2 Jan 2006, 15:04 UTC")
 }
 
 func overall(counts map[string]int, total int) Overall {
@@ -119,6 +189,8 @@ func overall(counts map[string]int, total int) Overall {
 		return Overall{"major", "Major outage"}
 	case counts["down"] > 0:
 		return Overall{"partial", "Partial outage"}
+	case counts["maintenance"] > 0:
+		return Overall{"maintenance", "Maintenance in progress"}
 	case counts["degraded"] > 0:
 		return Overall{"degraded", "Degraded performance"}
 	case counts["up"] == total:
@@ -128,9 +200,15 @@ func overall(counts map[string]int, total int) Overall {
 }
 
 func dayView(d store.Day) DayView {
-	v := DayView{Date: d.Date.Format("2006-01-02"), Uptime: d.Uptime(), Checks: d.Checks}
+	v := DayView{Date: d.Date.Format("2006-01-02"), Uptime: d.Uptime(), Checks: d.Checks, Maintenance: d.Maintenance}
 	date := d.Date.Format("2 Jan 2006")
+	planned := ""
+	if d.Maintenance > 0 {
+		planned = fmt.Sprintf(", %d failed during maintenance", d.Maintenance)
+	}
 	switch u := d.Uptime(); {
+	case u < 0 && d.Maintenance > 0:
+		v.Class, v.Label = "maintenance", fmt.Sprintf("%s: maintenance (%d failed checks)", date, d.Maintenance)
 	case u < 0:
 		v.Class, v.Label = "none", date+": no data"
 	default:
@@ -144,7 +222,7 @@ func dayView(d store.Day) DayView {
 		default:
 			v.Class = "major"
 		}
-		v.Label = fmt.Sprintf("%s: %s up (%d checks)", date, Percent(u), d.Checks)
+		v.Label = fmt.Sprintf("%s: %s up (%d checks%s)", date, Percent(u), d.Checks, planned)
 	}
 	return v
 }
@@ -163,11 +241,11 @@ func Percent(share float64) string {
 }
 
 // sparkline draws the latencies as an SVG path in a width × height box, from the left as the
-// oldest. Down checks are left out (their latency is the timeout).
+// oldest. Failed checks are left out (their latency is the timeout).
 func sparkline(points []store.Point, width, height float64) (string, float64) {
 	var values []float64
 	for _, p := range points {
-		if p.Status != check.Down {
+		if p.Status != check.Down && p.Status != check.Maintenance {
 			values = append(values, p.LatencyMs)
 		}
 	}

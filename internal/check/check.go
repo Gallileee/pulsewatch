@@ -27,6 +27,9 @@ const (
 	Up       Status = "up"
 	Degraded Status = "degraded"
 	Down     Status = "down"
+	// Maintenance is a failed check during planned maintenance (config.Maintenance): it opens
+	// no incident and doesn't count for uptime. A good check during maintenance stays Up.
+	Maintenance Status = "maintenance"
 )
 
 // UserAgent is sent with every HTTP check.

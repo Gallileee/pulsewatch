@@ -18,6 +18,15 @@ incidents:
 #     format: discord         # webhook (JSON), discord or slack
 #     url: ${DISCORD_WEBHOOK_URL}
 
+# Planned downtime: failures of the covered targets open no incident, send no alert and don't
+# count against the uptime; the status page announces the window.
+# maintenance:
+#   - title: Database upgrade
+#     start: 2026-11-24T22:00:00Z   # RFC 3339 with a zone
+#     end: 2026-11-24T23:30:00Z     # at most 7 days after the start
+#     targets: [Market Pulse]       # leave out to cover every target
+#     note: Search may be slow for a few minutes.
+
 targets:
   - name: Market Pulse
     url: https://gallileee.github.io/market-pulse/

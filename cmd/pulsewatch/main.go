@@ -98,6 +98,7 @@ func run() error {
 		if err != nil {
 			return err
 		}
+		cfg.Maintenance = demoMaintenance(time.Now())
 		log.Info("demo service running", "url", baseURL)
 	} else if cfg, err = config.Load(*configPath); err != nil {
 		return err
@@ -144,7 +145,7 @@ func run() error {
 	clk := clock.Real{}
 	mon := monitor.New(cfg, checkers, st, m, dispatcher, clk, log)
 	site := &web.Server{
-		Title: cfg.Title, Targets: cfg.Targets, Store: st, Metrics: m, Broker: mon.Broker, Clock: clk, Log: log,
+		Title: cfg.Title, Targets: cfg.Targets, Maintenance: cfg.Maintenance, Store: st, Metrics: m, Broker: mon.Broker, Clock: clk, Log: log,
 	}
 	if *once {
 		return runOnce(mon, dispatcher, st, site, cfg.DataFile, *siteDir, log)
@@ -238,6 +239,25 @@ func saveLoop(ctx context.Context, st *store.Store, path string, log *slog.Logge
 				log.Error("saving the history", "error", err)
 			}
 		}
+	}
+}
+
+// demoMaintenance plans two windows around the demo's start (the config file can't, its times
+// are fixed): Payments is under maintenance for its first 20 minutes, so its failures open no
+// incident, and a window for everything is announced for the next evening.
+func demoMaintenance(now time.Time) []config.Maintenance {
+	now = now.UTC().Truncate(time.Minute)
+	evening := time.Date(now.Year(), now.Month(), now.Day()+1, 22, 0, 0, 0, time.UTC)
+	return []config.Maintenance{
+		{
+			Title: "Payment provider switch", Start: config.Time{Time: now.Add(-2 * time.Minute)},
+			End: config.Time{Time: now.Add(20 * time.Minute)}, Targets: []string{"Payments"}, TargetIDs: []string{"payments"},
+			Note: "Card payments may fail now and then while traffic moves to the new provider.",
+		},
+		{
+			Title: "Database upgrade", Start: config.Time{Time: evening}, End: config.Time{Time: evening.Add(90 * time.Minute)},
+			Note: "Everything may be unavailable for a few minutes during the switchover.",
+		},
 	}
 }
 

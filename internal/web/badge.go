@@ -29,6 +29,8 @@ func BadgeFor(t TargetView) Badge {
 		b.Color = "yellow"
 	case "down":
 		b.Color = "red"
+	case "maintenance":
+		b.Color = "blue"
 	default:
 		b.Color = "lightgrey"
 	}
