@@ -21,7 +21,7 @@
     {{template "live" .}}
   </main>
   <footer class="wrap foot">
-    <p>Uptime counts degraded checks as up. Days are in UTC.
+    <p>Uptime counts degraded checks as up and leaves out failures during planned maintenance. Days are in UTC.
       {{if .Static}}<a href="status.json">JSON</a>{{else}}<a href="api/status">JSON</a> · <a href="metrics">Prometheus metrics</a>{{end}} ·
       Powered by <a href="https://github.com/Gallileee/pulsewatch">Pulsewatch</a></p>
   </footer>
@@ -33,6 +33,23 @@
   <h2 id="overall">{{.Overall.Text}}</h2>
   <p>Updated <time datetime="{{iso .Generated}}" data-relative>{{clock .Generated}}</time></p>
 </section>
+
+{{if .Maintenance}}
+<section class="maintenance" aria-labelledby="maintenance-title">
+  <h2 id="maintenance-title">Scheduled maintenance</h2>
+  <ol>
+    {{range .Maintenance}}
+    <li class="window{{if .Active}} window-active{{end}}">
+      <p><strong>{{.Title}}</strong>
+        {{if .Active}}<span class="pill pill-maintenance">In progress</span>{{else}}<span class="pill">Scheduled</span>{{end}}</p>
+      <p class="muted"><time datetime="{{iso .Start}}">{{.When}}</time> ·
+        {{if .Targets}}{{range $i, $name := .Targets}}{{if $i}}, {{end}}{{$name}}{{end}}{{else}}All services{{end}}</p>
+      {{if .Note}}<p>{{.Note}}</p>{{end}}
+    </li>
+    {{end}}
+  </ol>
+</section>
+{{end}}
 
 <section aria-label="Services" class="targets">
   {{range .Targets}}
@@ -46,6 +63,8 @@
       {{if not .LastChecked.IsZero}}<span class="muted">· {{ms .LatencyMs}} · checked
         <time datetime="{{iso .LastChecked}}" data-relative>{{clock .LastChecked}}</time></span>{{end}}
     </p>
+    {{if .Maintenance}}<p class="planned">Planned maintenance: {{.Maintenance}}, until
+      <time datetime="{{iso .MaintenanceEnd}}">{{clock .MaintenanceEnd}}</time>. Failures now open no incident.</p>{{end}}
     <dl class="uptimes">
       <div><dt>24 hours</dt><dd>{{percent .Uptime24h}}</dd></div>
       <div><dt>7 days</dt><dd>{{percent .Uptime7d}}</dd></div>

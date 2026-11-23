@@ -40,6 +40,9 @@ type Hour struct {
 	Up        int     `json:"up"`
 	Degraded  int     `json:"degraded"`
 	LatencyMs float64 `json:"latency_ms"` // the sum
+	// Maintenance counts the failed checks during planned maintenance; they aren't in Checks,
+	// so they don't count against the uptime.
+	Maintenance int `json:"maintenance,omitempty"`
 }
 
 // Good is the number of checks that weren't down.
@@ -104,13 +107,17 @@ func (s *Store) Record(r check.Result) {
 		sr.Hours = append(sr.Hours, Hour{Start: start})
 	}
 	h := &sr.Hours[len(sr.Hours)-1]
-	h.Checks++
-	h.LatencyMs += ms
 	switch r.Status {
+	case check.Maintenance:
+		h.Maintenance++
 	case check.Up:
 		h.Up++
 	case check.Degraded:
 		h.Degraded++
+	}
+	if r.Status != check.Maintenance {
+		h.Checks++
+		h.LatencyMs += ms
 	}
 	cutoff := r.At.Add(-Retention).Unix()
 	drop := 0
@@ -171,6 +178,8 @@ type Day struct {
 	Date   time.Time // midnight UTC
 	Checks int
 	Good   int
+	// Maintenance is the failed checks during planned maintenance (not in Checks).
+	Maintenance int
 }
 
 // Uptime is the share of good checks, or -1 with none.
@@ -205,6 +214,7 @@ func (s *Store) Days(id string, n int, now time.Time) []Day {
 		}
 		days[i].Checks += h.Checks
 		days[i].Good += h.Good()
+		days[i].Maintenance += h.Maintenance
 	}
 	return days
 }

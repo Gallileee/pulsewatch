@@ -1,6 +1,22 @@
 # Changelog
 
-## v0.3.0 — status badges
+## v0.4.0 — maintenance windows
+
+- **`maintenance:` in the config** lists planned downtime: a title, a start and an end (RFC 3339
+  with a zone, at most 7 days), the targets it covers (all if left out) and a note.
+- **During a window, a failed check of a covered target is `maintenance`, not `down`:** it opens
+  no incident, sends no alert and is left out of the uptime (the hourly totals count it
+  separately). Good checks count as usual. A failure streak or an incident from before the
+  window carries on afterwards.
+- **The status page** lists the windows going on ("In progress") and announced ("Scheduled"),
+  marks a covered target with the window and its end, says "Maintenance in progress" in the
+  banner unless something is really down, and colours a day that had only planned failures.
+  The badge of a target under maintenance is blue.
+- **Metrics:** `pulsewatch_maintenance` per target, and `status="maintenance"` in
+  `pulsewatch_checks_total`.
+- The demo plans two windows: one going on for Payments, one announced for the next evening.
+
+## v0.3.0 — status badges (2026-11-21)
 
 - `/badge/<id>.json` (and `badge/<id>.json` in a static site) gives each target's status in
   the [Shields.io endpoint badge](https://shields.io/badges/endpoint-badge) format: the status

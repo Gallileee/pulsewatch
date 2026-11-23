@@ -60,7 +60,7 @@ func get(t *testing.T, h http.Handler, path string) *httptest.ResponseRecorder {
 }
 
 func TestBuild(t *testing.T) {
-	p := Build("Acme", targets, fixture(), now)
+	p := Build("Acme", targets, nil, fixture(), now)
 	if p.Overall.Status != "partial" || p.Overall.Text != "Partial outage" {
 		t.Errorf("overall %+v", p.Overall)
 	}

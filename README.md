@@ -41,6 +41,12 @@ watches my other projects, [Market Pulse](https://gallileee.github.io/market-pul
   default). It counts from the first failed check, so a single blip opens nothing. It's
   resolved after `successes_to_resolve` good checks. Degraded counts as good, so slow isn't an
   outage. An incident that was open at a restart continues and closes when the target recovers.
+- **Maintenance windows:** planned downtime, listed in the config. While a window is on, a
+  failed check of a target it covers is recorded as `maintenance`: it opens no incident, sends
+  no alert and is left out of the uptime. Good checks count as usual, so a recovery still
+  closes an incident that was open before the window. The page lists the windows going on and
+  those announced, marks the target ("Planned maintenance: …, until …") and the daily bar, and
+  the banner says "Maintenance in progress" unless something is really down.
 - **Alerts** go out when an incident opens or is resolved:
   - **Formats:** a Discord or Slack message, or the whole incident as JSON to any webhook.
   - **Retries:** network errors, 429 and 5xx are retried after 1 s, 2 s and 4 s. A 4xx isn't
@@ -55,7 +61,7 @@ watches my other projects, [Market Pulse](https://gallileee.github.io/market-pul
 - **Status page:**
   - **Contents:** an overall banner, then per target its status, last message, uptime for
     24 hours, 7 days and 90 days, 90 daily bars (each with a tooltip) and a response-time line.
-    The incident history is listed below.
+    The incident history is listed below, and planned maintenance above the targets.
   - **Live updates:** the page listens to **server-sent events**. After each check it fetches
     the re-rendered part once a second at most. Without JavaScript it still works, as a plain
     page.
@@ -65,7 +71,10 @@ watches my other projects, [Market Pulse](https://gallileee.github.io/market-pul
   - `/api/status` gives the page as JSON (CORS open: it's public).
   - `/metrics` is Prometheus text format: `pulsewatch_up`, `pulsewatch_degraded`,
     `pulsewatch_checks_total`, a `pulsewatch_check_duration_seconds` histogram,
-    `pulsewatch_incident_open` and `pulsewatch_tls_cert_expiry_timestamp_seconds`.
+    `pulsewatch_incident_open`, `pulsewatch_maintenance` and
+    `pulsewatch_tls_cert_expiry_timestamp_seconds`. `pulsewatch_up` is 0 for a failure during
+    maintenance too, so an alert rule can say `pulsewatch_up == 0 unless on(target)
+    pulsewatch_maintenance == 1`.
   - `/healthz` answers `ok`.
   - `/badge/<id>.json` is a target's status and 7-day uptime for a
     [Shields.io endpoint badge](https://shields.io/badges/endpoint-badge). A README can show
@@ -107,12 +116,18 @@ targets:
     type: dns
     host: github.com
     # expect_addresses: [192.0.2.10]   # optional: must resolve to one of these
+maintenance:
+  - title: Database upgrade
+    start: 2026-11-24T22:00:00Z    # RFC 3339 with a zone (Z or +01:00)
+    end: 2026-11-24T23:30:00Z      # at most 7 days after the start
+    targets: [Market Pulse]        # names; leave out to cover every target
+    note: Search may be slow for a few minutes.
 ```
 
 [examples/pulsewatch.yaml](examples/pulsewatch.yaml) is a complete file. The config is
 checked when Pulsewatch starts, and all its problems are listed at once: an unknown key, a bad
-duration, a duplicate name, a URL that isn't http(s), a timeout as long as the interval, and
-so on.
+duration, a duplicate name, a URL that isn't http(s), a timeout as long as the interval, a
+maintenance time without a zone or for a target that doesn't exist, and so on.
 
 ## Running it
 
@@ -167,12 +182,16 @@ The **demo** (`-demo`) runs a small local service that misbehaves on purpose:
 - one fails a quarter of the time, which is not enough for an incident;
 - one has an outage every 6 minutes, so incidents open, alerts would go out and they resolve.
 
+It also plans two maintenance windows: the flaky endpoint is under maintenance for the first
+20 minutes (its failures open no incident), and a window for everything is announced for the
+next evening.
+
 ## How it's built
 
 | Package | Role |
 | --- | --- |
 | `internal/config` | YAML (strict: unknown keys are errors), defaults, `${ENV}` in values, validation. |
-| `internal/check` | The HTTP, TLS and DNS checks; a result is up, degraded or down, with a message. |
+| `internal/check` | The HTTP, TLS and DNS checks; a result is up, degraded or down (or maintenance), with a message. |
 | `internal/incident` | A small state machine per target: failure and success streaks, incidents. |
 | `internal/store` | Recent checks and hourly totals; uptime and daily bars; atomic JSON save. |
 | `internal/monitor` | One goroutine per target, a semaphore for concurrency, and the event broker for live updates. |
@@ -197,6 +216,11 @@ Some decisions:
 - **Hourly totals, not every check.** 90 days of one-minute checks is about 130,000 results
   per target. Hourly totals are 2,160 rows and still give uptime and daily bars. The last 60
   checks are kept one by one for the response-time line.
+- **Maintenance is decided when a check is recorded, not when the page is drawn.** The
+  monitor turns a failure inside a window into a `maintenance` result before the store, the
+  metrics and the incident tracker see it. So the history stays right if the window is later
+  removed from the config, and the tracker simply never sees the planned failures: a failure
+  streak neither grows nor resets, and an incident from before the window stays open.
 - **Only one dependency,** `gopkg.in/yaml.v3`. Everything else is the standard library.
 
 ## Development
@@ -217,8 +241,11 @@ smoke test of the demo inside it. The workflow itself is checked by
   somewhere else, or use an outside check on `/healthz`. On GitHub Actions, a failed run
   shows on the Actions tab, and the page's "Updated" time stops moving.
 - Uptime counts whole hours, so "24 hours" may include up to one more hour. Days are in UTC.
-- No email alerts yet, no authentication for private pages, no maintenance windows (see
+- No email alerts yet and no authentication for private pages (see
   [PROGRESS.md](PROGRESS.md)).
+- Maintenance windows come from the config, so changing them means a restart (or the next
+  `-once` run). Windows that have ended aren't listed; the daily bars and their tooltips show
+  the failures they covered. Windows don't repeat (no "every Sunday 02:00").
 
 ## License
 

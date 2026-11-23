@@ -31,22 +31,24 @@ type Alerter interface {
 
 // Monitor runs the checks.
 type Monitor struct {
-	Targets    []*Target
-	Store      *store.Store
-	Metrics    *metrics.Metrics
-	Broker     *Broker
-	Alerter    Alerter
-	Clock      clock.Clock
-	Log        *slog.Logger
-	PublicURL  string
-	concurrent chan struct{}
+	Targets   []*Target
+	Store     *store.Store
+	Metrics   *metrics.Metrics
+	Broker    *Broker
+	Alerter   Alerter
+	Clock     clock.Clock
+	Log       *slog.Logger
+	PublicURL string
+	// Maintenance is the planned downtime: failures during it open no incident.
+	Maintenance []config.Maintenance
+	concurrent  chan struct{}
 }
 
 // New makes a monitor; checkers holds one checker per target, in the config's order.
 func New(cfg *config.Config, checkers []check.Checker, st *store.Store, m *metrics.Metrics, alerter Alerter, clk clock.Clock, log *slog.Logger) *Monitor {
 	mon := &Monitor{
 		Store: st, Metrics: m, Broker: NewBroker(), Alerter: alerter, Clock: clk, Log: log,
-		PublicURL: cfg.PublicURL, concurrent: make(chan struct{}, cfg.MaxConcurrent),
+		PublicURL: cfg.PublicURL, Maintenance: cfg.Maintenance, concurrent: make(chan struct{}, cfg.MaxConcurrent),
 	}
 	for i, t := range cfg.Targets {
 		tracker := incident.NewTracker(t.ID, t.Name, cfg.Incidents.FailuresToOpen, cfg.Incidents.SuccessesToResolve)
@@ -123,10 +125,24 @@ func (m *Monitor) CheckOnce(ctx context.Context, t *Target) {
 		return // stopped while checking: the result says nothing about the target
 	}
 	r.TargetID = t.Config.ID
+	window, planned := config.InMaintenance(m.Maintenance, t.Config.ID, r.At)
+	if planned && r.Status == check.Down {
+		r.Status = check.Maintenance
+	}
 	m.Store.Record(r)
 	m.Metrics.Observe(r)
+	m.Metrics.SetMaintenance(t.Config.ID, planned)
 	if r.Status != check.Up && m.Log != nil {
 		m.Log.Info("check", "target", t.Config.ID, "status", r.Status, "message", r.Message)
+	}
+	if r.Status == check.Maintenance {
+		// Planned: the incident tracker doesn't see it, so a failure streak neither grows nor
+		// ends, and an incident open from before the window stays open.
+		if m.Log != nil {
+			m.Log.Info("failure during maintenance, no incident", "target", t.Config.ID, "maintenance", window.Title)
+		}
+		m.Broker.Publish(Event{TargetID: t.Config.ID, Status: r.Status, At: r.At})
+		return
 	}
 	change := t.tracker.Observe(r)
 	m.Store.SetTracker(t.Config.ID, t.tracker.State())
