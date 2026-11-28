@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"net/mail"
 	"net/url"
 	"os"
 	"regexp"
@@ -29,6 +30,18 @@ const (
 	FormatWebhook = "webhook"
 	FormatDiscord = "discord"
 	FormatSlack   = "slack"
+	FormatEmail   = "email"
+)
+
+// How an email alert talks to its SMTP server.
+const (
+	// SecurityStartTLS connects in plain text and switches to TLS before anything else is sent
+	// (port 587). If the server doesn't offer STARTTLS, nothing is sent.
+	SecurityStartTLS = "starttls"
+	// SecurityTLS uses TLS from the start (port 465).
+	SecurityTLS = "tls"
+	// SecurityNone sends in plain text, for a local test server like Mailpit. No password then.
+	SecurityNone = "none"
 )
 
 // MinInterval is the shortest interval between two checks of one target.
@@ -134,10 +147,24 @@ type Incident struct {
 // Alert is where notifications go.
 type Alert struct {
 	Name string `yaml:"name"`
-	// Format is webhook (the incident as JSON), discord or slack.
+	// Format is webhook (the incident as JSON), discord, slack or email.
 	Format string `yaml:"format"`
 	// URL may use ${VARIABLE}s, so a webhook's secret stays out of the file.
 	URL string `yaml:"url"`
+
+	// The rest is for email.
+
+	// SMTP is the mail server as host:port.
+	SMTP string `yaml:"smtp"`
+	// Security is starttls (the default), tls or none.
+	Security string `yaml:"security"`
+	// Username and Password log in to the server (both or neither); use ${VARIABLE}s.
+	Username string `yaml:"username"`
+	Password string `yaml:"password"`
+	// From is the sender, for example "pulsewatch <alerts@example.com>".
+	From string `yaml:"from"`
+	// To lists the recipients.
+	To []string `yaml:"to"`
 }
 
 // Target is one thing to watch.
@@ -212,8 +239,13 @@ func (c *Config) expand() error {
 		replace(s)
 	}
 	for i := range c.Alerts {
-		replace(&c.Alerts[i].Name)
-		replace(&c.Alerts[i].URL)
+		a := &c.Alerts[i]
+		for _, s := range []*string{&a.Name, &a.URL, &a.SMTP, &a.Username, &a.Password, &a.From} {
+			replace(s)
+		}
+		for j := range a.To {
+			replace(&a.To[j])
+		}
 	}
 	for i := range c.Targets {
 		t := &c.Targets[i]
@@ -248,8 +280,12 @@ func (c *Config) defaults() {
 		c.Incidents.SuccessesToResolve = 2
 	}
 	for i := range c.Alerts {
-		if c.Alerts[i].Format == "" {
-			c.Alerts[i].Format = FormatWebhook
+		a := &c.Alerts[i]
+		if a.Format == "" {
+			a.Format = FormatWebhook
+		}
+		if a.Format == FormatEmail && a.Security == "" {
+			a.Security = SecurityStartTLS
 		}
 	}
 	for i := range c.Targets {
@@ -296,11 +332,15 @@ func (c *Config) validate() error {
 		}
 		switch a.Format {
 		case FormatWebhook, FormatDiscord, FormatSlack:
+			if !isHTTPURL(a.URL) {
+				add("%s: url isn't an http(s) URL", where) // not shown: it may hold a secret
+			}
+		case FormatEmail:
+			for _, problem := range a.emailProblems() {
+				add("%s: %s", where, problem)
+			}
 		default:
-			add("%s: format %q isn't webhook, discord or slack", where, a.Format)
-		}
-		if !isHTTPURL(a.URL) {
-			add("%s: url isn't an http(s) URL", where) // not shown: it may hold a secret
+			add("%s: format %q isn't webhook, discord, slack or email", where, a.Format)
 		}
 	}
 	if len(c.Targets) == 0 {
@@ -406,6 +446,41 @@ func SplitHostPort(hostport, port string) (string, string, error) {
 		return "", "", errors.New("no host")
 	}
 	return host, p, nil
+}
+
+// emailProblems lists what's wrong with an email alert. The password is never part of a message.
+func (a Alert) emailProblems() []string {
+	var problems []string
+	if a.URL != "" {
+		problems = append(problems, "url is for webhooks; an email alert needs smtp, from and to")
+	}
+	if host, port, err := net.SplitHostPort(a.SMTP); err != nil || host == "" || port == "" {
+		problems = append(problems, fmt.Sprintf("smtp %q isn't host:port (for example smtp.example.com:587)", a.SMTP))
+	}
+	switch a.Security {
+	case SecurityStartTLS, SecurityTLS:
+	case SecurityNone:
+		if a.Password != "" {
+			problems = append(problems, "security none would send the password unencrypted; use starttls or tls")
+		}
+	default:
+		problems = append(problems, fmt.Sprintf("security %q isn't starttls, tls or none", a.Security))
+	}
+	if (a.Username == "") != (a.Password == "") {
+		problems = append(problems, "username and password go together")
+	}
+	if _, err := mail.ParseAddress(a.From); err != nil {
+		problems = append(problems, fmt.Sprintf("from %q isn't an email address", a.From))
+	}
+	if len(a.To) == 0 {
+		problems = append(problems, "to: nobody to send to")
+	}
+	for _, to := range a.To {
+		if _, err := mail.ParseAddress(to); err != nil {
+			problems = append(problems, fmt.Sprintf("to %q isn't an email address", to))
+		}
+	}
+	return problems
 }
 
 func isHTTPURL(s string) bool {

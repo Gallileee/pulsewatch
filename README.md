@@ -48,13 +48,20 @@ watches my other projects, [Market Pulse](https://gallileee.github.io/market-pul
   those announced, marks the target ("Planned maintenance: …, until …") and the daily bar, and
   the banner says "Maintenance in progress" unless something is really down.
 - **Alerts** go out when an incident opens or is resolved:
-  - **Formats:** a Discord or Slack message, or the whole incident as JSON to any webhook.
-  - **Retries:** network errors, 429 and 5xx are retried after 1 s, 2 s and 4 s. A 4xx isn't
-    retried.
+  - **Formats:** a Discord or Slack message, the whole incident as JSON to any webhook, or an
+    email.
+  - **Email:** plain text over SMTP with STARTTLS (port 587, the default) or TLS (port 465);
+    if the server doesn't offer STARTTLS, nothing is sent rather than sent unencrypted. The
+    recovery email answers the outage email, so mail apps keep both in one thread.
+    `security: none` is only for a local test server such as Mailpit, and then without a
+    password.
+  - **Retries:** network errors, 429 and 5xx (and SMTP 4xx replies) are retried after 1 s, 2 s
+    and 4 s. A 4xx webhook reply, an SMTP 5xx reply (a wrong password, an unknown recipient)
+    and an untrusted certificate aren't retried.
   - **Never blocking:** sending happens in the background, so a slow webhook never delays a
     check.
-  - **Secrets:** webhook URLs come from `${ENVIRONMENT_VARIABLES}`. Errors and logs never show
-    them.
+  - **Secrets:** webhook URLs and SMTP passwords come from `${ENVIRONMENT_VARIABLES}`. Errors
+    and logs never show them.
 - **History:** the last 60 checks and hourly totals for 90 days, per target. It's saved to a
   JSON file every minute and on shutdown, written to a temporary file and renamed so a crash
   can't corrupt it. A file that can't be read is moved aside, not overwritten.
@@ -98,8 +105,16 @@ incidents:
   successes_to_resolve: 2
 alerts:
   - name: team chat
-    format: discord          # webhook, discord or slack
+    format: discord          # webhook, discord, slack or email
     url: ${DISCORD_WEBHOOK_URL}
+  - name: on-call
+    format: email
+    smtp: smtp.example.com:587     # host:port
+    security: starttls             # default; tls for port 465, none for a local test server
+    username: ${SMTP_USERNAME}     # both or neither
+    password: ${SMTP_PASSWORD}
+    from: pulsewatch <alerts@example.com>
+    to: [ops@example.com]
 targets:
   - name: Market Pulse
     url: https://gallileee.github.io/market-pulse/
@@ -142,7 +157,10 @@ go build -o pulsewatch ./cmd/pulsewatch             # one static binary
 With Docker, `docker compose up --build` starts Pulsewatch on :8080 with the example config,
 and Prometheus on :9090 scraping it. The image is distroless and runs as a non-root user; the
 history lives in a volume. For alerts, put `DISCORD_WEBHOOK_URL=...` in a `.env` file next to
-`docker-compose.yml` (it's git-ignored) and uncomment the alert in the config.
+`docker-compose.yml` (it's git-ignored) and uncomment the alert in the config. To try email
+alerts without a mail account, run [Mailpit](https://mailpit.axllent.org/)
+(`docker run -p 8025:8025 -p 1025:1025 axllent/mailpit`) and point an email alert at
+`smtp: localhost:1025` with `security: none`; the emails show up on http://localhost:8025.
 
 ### Free hosting on GitHub Actions and Pages
 
@@ -241,8 +259,10 @@ smoke test of the demo inside it. The workflow itself is checked by
   somewhere else, or use an outside check on `/healthz`. On GitHub Actions, a failed run
   shows on the Actions tab, and the page's "Updated" time stops moving.
 - Uptime counts whole hours, so "24 hours" may include up to one more hour. Days are in UTC.
-- No email alerts yet and no authentication for private pages (see
-  [PROGRESS.md](PROGRESS.md)).
+- No authentication for private pages (see [PROGRESS.md](PROGRESS.md)).
+- Email alerts are plain text, one email per incident change, sent with `AUTH PLAIN` only
+  (what Gmail app passwords, Fastmail, Mailgun and most providers accept); no OAuth2 login,
+  no HTML. Each alert goes to every recipient in one email, so recipients see each other.
 - Maintenance windows come from the config, so changing them means a restart (or the next
   `-once` run). Windows that have ended aren't listed; the daily bars and their tooltips show
   the failures they covered. Windows don't repeat (no "every Sunday 02:00").

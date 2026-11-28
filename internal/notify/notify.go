@@ -1,5 +1,5 @@
-// Package notify sends alerts when an incident opens or is resolved: to a webhook as JSON, or
-// as a Discord or Slack message.
+// Package notify sends alerts when an incident opens or is resolved: to a webhook as JSON, as a
+// Discord or Slack message, or by email.
 package notify
 
 import (
@@ -80,8 +80,15 @@ type Webhook struct {
 	Sleep func(ctx context.Context, d time.Duration) error
 }
 
-// FromConfig makes a webhook notifier.
-func FromConfig(a config.Alert) *Webhook {
+// FromConfig makes the notifier an alert in the config describes.
+func FromConfig(a config.Alert) Notifier {
+	if a.Format == config.FormatEmail {
+		return emailFromConfig(a)
+	}
+	return webhookFromConfig(a)
+}
+
+func webhookFromConfig(a config.Alert) *Webhook {
 	label := a.Name
 	if label == "" {
 		label = a.Format
@@ -101,17 +108,21 @@ func (w *Webhook) Notify(ctx context.Context, a Alert) error {
 	if err != nil {
 		return err
 	}
-	attempts := w.Attempts
+	return retry(ctx, w.Attempts, w.Sleep, func() error { return w.post(ctx, body) })
+}
+
+// retry calls send until it works, fails with errPermanent or has been tried `attempts` times
+// (4 if 0), waiting 1s, 2s, 4s... in between.
+func retry(ctx context.Context, attempts int, sleep func(context.Context, time.Duration) error, send func() error) error {
 	if attempts == 0 {
 		attempts = 4
 	}
-	sleep := w.Sleep
 	if sleep == nil {
 		sleep = sleepContext
 	}
 	wait := time.Second
 	for try := 1; ; try++ {
-		err = w.post(ctx, body)
+		err := send()
 		var permanent errPermanent
 		if err == nil || errors.As(err, &permanent) || try == attempts {
 			return err

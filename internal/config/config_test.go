@@ -81,7 +81,9 @@ func TestValidationListsEveryProblem(t *testing.T) {
 max_concurrent: -1
 alerts:
   - name: team
-    format: email
+    format: pager
+  - name: hook
+    format: slack
     url: ${SECRET_HOOK}
 targets:
   - name: Web
@@ -107,8 +109,8 @@ targets:
 	}
 	for _, want := range []string{
 		"max_concurrent",
-		`alert "team": format "email"`,
-		`alert "team": url isn't an http(s) URL`,
+		`alert "team": format "pager" isn't webhook, discord, slack or email`,
+		`alert "hook": url isn't an http(s) URL`,
 		`target "Web": url "ftp://example.com"`,
 		`target "Web": interval must be at least 5s`,
 		`target "web": another target has the same name`,
@@ -192,5 +194,77 @@ func TestVariablesInCommentsAreIgnored(t *testing.T) {
 func TestEmptyFile(t *testing.T) {
 	if _, err := Parse(nil); err == nil || !strings.Contains(err.Error(), "nothing to watch") {
 		t.Errorf("%v", err)
+	}
+}
+
+func TestEmailAlert(t *testing.T) {
+	t.Setenv("SMTP_PASSWORD", "s3cret")
+	cfg, err := Parse([]byte(`
+alerts:
+  - name: on-call
+    format: email
+    smtp: smtp.example.com:587
+    username: alerts@example.com
+    password: ${SMTP_PASSWORD}
+    from: pulsewatch <alerts@example.com>
+    to: [ops@example.com, "Dana <dana@example.com>"]
+targets:
+  - name: a
+    url: http://a.test
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	a := cfg.Alerts[0]
+	if a.Format != FormatEmail || a.Security != SecurityStartTLS || a.Password != "s3cret" || len(a.To) != 2 {
+		t.Errorf("%+v", a)
+	}
+}
+
+func TestEmailAlertProblems(t *testing.T) {
+	t.Setenv("SMTP_PASSWORD", "hunter2-secret")
+	_, err := Parse([]byte(`
+alerts:
+  - name: mail
+    format: email
+    url: https://hooks.test/x
+    smtp: smtp.example.com
+    security: ssl
+    username: me
+    from: not an address
+    to: [ok@example.com, "@nope"]
+  - name: plain
+    format: email
+    smtp: localhost:1025
+    security: none
+    username: me
+    password: ${SMTP_PASSWORD}
+    from: a@example.com
+targets:
+  - name: a
+    url: http://a.test
+`))
+	if err == nil {
+		t.Fatal("no error")
+	}
+	for _, want := range []string{
+		`alert "mail": url is for webhooks`,
+		`alert "mail": smtp "smtp.example.com" isn't host:port`,
+		`alert "mail": security "ssl" isn't starttls, tls or none`,
+		`alert "mail": username and password go together`,
+		`alert "mail": from "not an address" isn't an email address`,
+		`alert "mail": to "@nope" isn't an email address`,
+		`alert "plain": security none would send the password unencrypted`,
+		`alert "plain": to: nobody to send to`,
+	} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("missing %q in:\n%v", want, err)
+		}
+	}
+	if strings.Contains(err.Error(), "hunter2") {
+		t.Error("the error shows the password")
+	}
+	if strings.Contains(err.Error(), `alert "plain": username`) {
+		t.Errorf("username and password are both set for plain:\n%v", err)
 	}
 }

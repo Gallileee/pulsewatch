@@ -1,5 +1,47 @@
 # Progress log
 
+## 2026-11-28 (scheduled run): email alerts
+
+Why: next step 1. Chat webhooks need a team chat; email is what a solo maintainer already has,
+and it's what every hosted monitor offers first. The SMTP part needs no mail account to build
+and test (a fake server in the tests, Mailpit for a try-out); only the Discord alert from the
+Actions run needs a repository secret, so that half stays for the owner.
+
+Acceptance criteria:
+- `format: email` with `smtp` (host:port), `security` (`starttls` default, `tls`, `none`),
+  optional `username`/`password`, `from`, `to`; `${VARIABLES}` in all of them; every problem
+  reported at once, never the password.
+- With `starttls`, nothing but EHLO and STARTTLS before TLS; a server without STARTTLS gets no
+  email. `none` with a password is a config error.
+- The outage and recovery emails are one thread; subjects stay one line.
+- Retries like the webhooks: 4xx and network errors again, 5xx and bad certificates not.
+
+Done:
+- `config.Alert` email fields, `FormatEmail`, `Security*`, `emailProblems`; webhook URL checks
+  only for webhook formats.
+- `notify.Email` (net/smtp with a context: the connection closes when it ends), `Message`
+  (quoted-printable text, RFC 2047 subject folded under 78 characters a line, Message-ID from
+  the incident, `In-Reply-To`/`References` on the recovery, `Auto-Submitted`), `smtpError` /
+  `tlsError` decide what is retried. The webhook retry loop became `retry` for both.
+  `FromConfig` returns a `Notifier`.
+- 10 new tests (8 against a fake SMTP server: STARTTLS + login, no STARTTLS, implicit TLS,
+  plain, untrusted certificate, 4xx retried / 5xx not, a server that never answers, the
+  message; 2 config). One existing case changed on purpose: "email" was the example of an
+  unknown format.
+- README (features, config, Mailpit try-out, limits), CHANGELOG v0.5.0 (v0.4.0 heading dated),
+  example config.
+
+Verified locally:
+- `go vet ./...`, `gofmt -l`: clean; `go test ./...`: all pass (103 test functions).
+- Hand-made mutants, 7 of 7 caught: no STARTTLS check, 5xx retried, no `In-Reply-To`, bad
+  certificate retried, line breaks kept in the subject, `none` allowed with a password,
+  `none` as the default.
+- The real binary: two `-once` runs against a refused port with an email alert to a local
+  fake SMTP server (`security: none`): the second run opened the incident and the email
+  arrived with the folded subject, the error, "Failed checks: 2 in a row".
+
+Not verified: delivery through a real provider (Gmail, Fastmail...) over the internet.
+
 ## 2026-11-23 (scheduled run): maintenance windows
 
 Why: next step 3, and the one with the most to learn: it touches every layer (config, monitor,
@@ -137,8 +179,9 @@ Verified locally:
 
 ## Next steps (in order)
 
-1. Email alerts (SMTP with STARTTLS, settings from the environment) next to the webhooks, and
-   a Discord alert from the Actions run (a repository secret).
+1. A Discord (or email) alert from the Actions run: needs a repository secret, so the owner
+   adds `DISCORD_WEBHOOK_URL` and the alert goes into `deploy/status.yaml`. Then send one
+   real email through a provider to check delivery.
 2. A Grafana dashboard (JSON, provisioned in the Compose file) on the Prometheus metrics.
 3. Reload the config on SIGHUP without losing the history or the open incidents (useful now
    that maintenance windows live in the config).
