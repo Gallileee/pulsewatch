@@ -51,12 +51,16 @@ type fakeMail struct {
 	tls        bool
 }
 
-func newFakeSMTP(t *testing.T, cert tls.Certificate) *fakeSMTP {
+// newFakeSMTP starts the server; options set its behaviour before the first connection.
+func newFakeSMTP(t *testing.T, cert tls.Certificate, options ...func(*fakeSMTP)) *fakeSMTP {
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
 	}
 	f := &fakeSMTP{t: t, ln: ln, cert: cert}
+	for _, option := range options {
+		option(f)
+	}
 	t.Cleanup(func() { ln.Close() })
 	go func() {
 		for {
@@ -160,6 +164,12 @@ func (f *fakeSMTP) sent() []fakeMail {
 	return append([]fakeMail(nil), f.mails...)
 }
 
+func (f *fakeSMTP) conns() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.connections
+}
+
 func (f *fakeSMTP) commands() string {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -206,8 +216,7 @@ func emailTo(f *fakeSMTP, pool *x509.CertPool, security string) *Email {
 
 func TestEmailOverSTARTTLSWithLogin(t *testing.T) {
 	cert, pool := selfSigned(t)
-	f := newFakeSMTP(t, cert)
-	f.startTLS = true
+	f := newFakeSMTP(t, cert, func(f *fakeSMTP) { f.startTLS = true })
 	e := emailTo(f, pool, config.SecurityStartTLS)
 	e.Username, e.Password = "pw-user", "s3cret"
 	if err := e.Notify(context.Background(), downAlert()); err != nil {
@@ -252,8 +261,8 @@ func TestNoEmailWithoutSTARTTLS(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "doesn't offer STARTTLS") {
 		t.Fatalf("err %v", err)
 	}
-	if len(f.sent()) != 0 || f.connections != 1 {
-		t.Errorf("sent %d over %d connections", len(f.sent()), f.connections)
+	if len(f.sent()) != 0 || f.conns() != 1 {
+		t.Errorf("sent %d over %d connections", len(f.sent()), f.conns())
 	}
 	if got := f.commands(); strings.Contains(got, "AUTH") || strings.Contains(got, "MAIL") {
 		t.Errorf("sent in plain text: %s", got)
@@ -262,8 +271,7 @@ func TestNoEmailWithoutSTARTTLS(t *testing.T) {
 
 func TestEmailOverImplicitTLS(t *testing.T) {
 	cert, pool := selfSigned(t)
-	f := newFakeSMTP(t, cert)
-	f.implicit = true
+	f := newFakeSMTP(t, cert, func(f *fakeSMTP) { f.implicit = true })
 	e := emailTo(f, pool, config.SecurityTLS)
 	e.Username, e.Password = "u", "p"
 	if err := e.Notify(context.Background(), downAlert()); err != nil {
@@ -288,8 +296,7 @@ func TestEmailWithoutEncryptionForALocalServer(t *testing.T) {
 
 func TestUntrustedCertificateIsNotRetried(t *testing.T) {
 	cert, _ := selfSigned(t)
-	f := newFakeSMTP(t, cert)
-	f.startTLS = true
+	f := newFakeSMTP(t, cert, func(f *fakeSMTP) { f.startTLS = true })
 	_, otherPool := selfSigned(t)
 	e := emailTo(f, otherPool, config.SecurityStartTLS)
 	err := e.Notify(context.Background(), downAlert())
@@ -297,32 +304,34 @@ func TestUntrustedCertificateIsNotRetried(t *testing.T) {
 	if err == nil || !errors.As(err, &permanent) || !strings.Contains(err.Error(), "TLS") {
 		t.Fatalf("err %v", err)
 	}
-	if f.connections != 1 || len(f.sent()) != 0 {
-		t.Errorf("%d connections, %d mails", f.connections, len(f.sent()))
+	if f.conns() != 1 || len(f.sent()) != 0 {
+		t.Errorf("%d connections, %d mails", f.conns(), len(f.sent()))
 	}
 }
 
 func TestEmailRetriesA4xxButNotA5xx(t *testing.T) {
 	cert, _ := selfSigned(t)
-	f := newFakeSMTP(t, cert)
-	f.replies = map[string]string{"MAIL": "451 try again later"}
-	f.failFirst = 2
+	f := newFakeSMTP(t, cert, func(f *fakeSMTP) {
+		f.replies = map[string]string{"MAIL": "451 try again later"}
+		f.failFirst = 2
+	})
 	e := emailTo(f, nil, config.SecurityNone)
 	var waits []time.Duration
 	e.Sleep = func(_ context.Context, d time.Duration) error { waits = append(waits, d); return nil }
 	if err := e.Notify(context.Background(), downAlert()); err != nil {
 		t.Fatal(err)
 	}
-	if len(f.sent()) != 1 || f.connections != 3 || fmt.Sprint(waits) != "[1s 2s]" {
-		t.Errorf("%d mails, %d connections, waits %v", len(f.sent()), f.connections, waits)
+	if len(f.sent()) != 1 || f.conns() != 3 || fmt.Sprint(waits) != "[1s 2s]" {
+		t.Errorf("%d mails, %d connections, waits %v", len(f.sent()), f.conns(), waits)
 	}
 
-	g := newFakeSMTP(t, cert)
-	g.replies = map[string]string{"RCPT": "550 no such user"}
-	g.failFirst = 10
+	g := newFakeSMTP(t, cert, func(f *fakeSMTP) {
+		f.replies = map[string]string{"RCPT": "550 no such user"}
+		f.failFirst = 10
+	})
 	err := emailTo(g, nil, config.SecurityNone).Notify(context.Background(), downAlert())
-	if err == nil || !strings.Contains(err.Error(), "recipient ops@example.com: 550 no such user") || g.connections != 1 {
-		t.Errorf("err %v after %d connections", err, g.connections)
+	if err == nil || !strings.Contains(err.Error(), "recipient ops@example.com: 550 no such user") || g.conns() != 1 {
+		t.Errorf("err %v after %d connections", err, g.conns())
 	}
 }
 
