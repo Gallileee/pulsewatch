@@ -1,5 +1,38 @@
 # Progress log
 
+## 2026-11-28 (scheduled run, second milestone): maintenance history and calendar
+
+Why: next step 4. After a window ends, the page forgot it, so a visitor who saw a red day bar
+couldn't tell it was planned; hosted status pages (Checkly, Statuspage) keep completed
+maintenance next to incidents and offer a calendar to subscribe to.
+
+Acceptance criteria:
+- Windows that ended in the last 90 days are in the history with the incidents, by start,
+  the latest first; older ones are left out; the JSON has them as `past_maintenance`.
+- `maintenance.ics` (live route and static site) lists every window: valid RFC 5545 (CRLF,
+  escaped text, lines folded at 75 octets without splitting a UTF-8 character), stable UIDs,
+  free time, hourly refresh. Linked from the page.
+
+Done:
+- `web.maintenanceViews` returns current and past; `Page.PastMaintenance`, `Page.History`
+  (`HistoryEntry` with an incident or a window); the template renders both kinds;
+  `.window-done`, `.section-head`.
+- `web.Calendar`, `escapeText`, `fold`; `GET /maintenance.ics`; `WriteSite` writes it.
+- 4 new tests (calendar content and folding, route and site file, history order and the
+  90-day cutoff); `TestPageShowsMaintenance` now expects the ended window in the history.
+- README, CHANGELOG (added to the untagged v0.5.0), the demo plans a window that ended.
+
+Verified locally:
+- `go vet ./...`, `gofmt -l`: clean; `go test ./...`: all pass.
+- Hand-made mutants, 7 of 7 caught (after two tests were made stricter: the past windows were
+  already in order in the fixture, and no test line needed a second continuation).
+- The static site from two `-once -site` runs (a past and an announced window, two targets
+  down), screenshotted with Playwright (Edge) at 1280 px dark and 375 px light: the completed
+  window in the history, "Add to calendar" next to the heading, the footer link, no sideways
+  scrolling, no console errors. `preview_start` was declined in this unattended run.
+
+Not verified: subscribing to the feed in a real calendar app (needs a public URL).
+
 ## 2026-11-28 (scheduled run): email alerts
 
 Why: next step 1. Chat webhooks need a team chat; email is what a solo maintainer already has,
@@ -185,5 +218,4 @@ Verified locally:
 2. A Grafana dashboard (JSON, provisioned in the Compose file) on the Prometheus metrics.
 3. Reload the config on SIGHUP without losing the history or the open incidents (useful now
    that maintenance windows live in the config).
-4. Past maintenance in the history list (Checkly shows completed windows next to incidents),
-   and an iCalendar feed (`maintenance.ics`) of announced windows.
+4. Repeating maintenance windows ("every Sunday 02:00 for 1 h", an RRULE in the calendar).

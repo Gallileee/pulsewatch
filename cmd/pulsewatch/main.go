@@ -242,9 +242,10 @@ func saveLoop(ctx context.Context, st *store.Store, path string, log *slog.Logge
 	}
 }
 
-// demoMaintenance plans two windows around the demo's start (the config file can't, its times
+// demoMaintenance plans windows around the demo's start (the config file can't, its times
 // are fixed): Payments is under maintenance for its first 20 minutes, so its failures open no
-// incident, and a window for everything is announced for the next evening.
+// incident, a window for everything is announced for the next evening, and one for Reports
+// ended the evening before (it shows in the history).
 func demoMaintenance(now time.Time) []config.Maintenance {
 	now = now.UTC().Truncate(time.Minute)
 	evening := time.Date(now.Year(), now.Month(), now.Day()+1, 22, 0, 0, 0, time.UTC)
@@ -257,6 +258,10 @@ func demoMaintenance(now time.Time) []config.Maintenance {
 		{
 			Title: "Database upgrade", Start: config.Time{Time: evening}, End: config.Time{Time: evening.Add(90 * time.Minute)},
 			Note: "Everything may be unavailable for a few minutes during the switchover.",
+		},
+		{
+			Title: "Report server patches", Start: config.Time{Time: evening.Add(-48 * time.Hour)},
+			End: config.Time{Time: evening.Add(-47 * time.Hour)}, Targets: []string{"Reports"}, TargetIDs: []string{"reports"},
 		},
 	}
 }

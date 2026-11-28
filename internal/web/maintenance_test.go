@@ -115,8 +115,19 @@ func TestPageShowsMaintenance(t *testing.T) {
 			t.Errorf("missing %q", want)
 		}
 	}
-	if strings.Contains(body, ">Over<") || strings.Contains(body, "<upgrade>") {
-		t.Error("an ended window, or unescaped text")
+	scheduled, history, _ := strings.Cut(body, `id="incidents-title"`)
+	if strings.Contains(scheduled, ">Over<") || strings.Contains(body, "<upgrade>") {
+		t.Error("an ended window in the scheduled list, or unescaped text")
+	}
+	// It's in the history instead, next to the incidents.
+	for _, want := range []string{">Incidents and maintenance<", "<strong>Over</strong>", "Maintenance completed",
+		"21 Nov 2026, 09:00–10:00 UTC"} {
+		if !strings.Contains(history, want) {
+			t.Errorf("history: missing %q", want)
+		}
+	}
+	if !strings.Contains(scheduled, `<a href="maintenance.ics" class="muted">Add to calendar</a>`) {
+		t.Error("no calendar link")
 	}
 
 	s.Maintenance = nil

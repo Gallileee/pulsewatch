@@ -25,8 +25,12 @@ type Page struct {
 	Targets []TargetView `json:"targets"`
 	// Maintenance is the planned downtime going on now and announced for later.
 	Maintenance []MaintenanceView `json:"maintenance"`
-	Incidents   []IncidentView    `json:"incidents"`
-	Generated   time.Time         `json:"generated"`
+	// PastMaintenance is the windows that ended in the last 90 days, the latest first.
+	PastMaintenance []MaintenanceView `json:"past_maintenance"`
+	Incidents       []IncidentView    `json:"incidents"`
+	// History is the incidents and the past maintenance together, the latest start first.
+	History   []HistoryEntry `json:"-"`
+	Generated time.Time      `json:"generated"`
 	// Static: written as files (no server for live updates, the JSON or the metrics).
 	Static bool `json:"-"`
 }
@@ -89,9 +93,23 @@ type IncidentView struct {
 	DurationText string `json:"duration"`
 }
 
+// HistoryEntry is one line of the history: an incident or a maintenance window that has ended.
+type HistoryEntry struct {
+	Incident    *IncidentView
+	Maintenance *MaintenanceView
+}
+
+func (h HistoryEntry) start() time.Time {
+	if h.Incident != nil {
+		return h.Incident.Started
+	}
+	return h.Maintenance.Start
+}
+
 // Build makes the page from the targets' history and the maintenance windows.
 func Build(title string, targets []config.Target, windows []config.Maintenance, st *store.Store, now time.Time) Page {
-	p := Page{Title: title, Generated: now, Maintenance: maintenanceViews(windows, targets, now)}
+	p := Page{Title: title, Generated: now}
+	p.Maintenance, p.PastMaintenance = maintenanceViews(windows, targets, now)
 	counts := map[string]int{}
 	for _, t := range targets {
 		v := TargetView{ID: t.ID, Name: t.Name, Type: t.Type, Status: "unknown", StatusText: "Not checked yet"}
@@ -123,6 +141,13 @@ func Build(title string, targets []config.Target, windows []config.Maintenance, 
 	for _, inc := range st.Incidents() {
 		p.Incidents = append(p.Incidents, IncidentView{Incident: inc, DurationText: notify.Duration(inc.Duration(now))})
 	}
+	for i := range p.Incidents {
+		p.History = append(p.History, HistoryEntry{Incident: &p.Incidents[i]})
+	}
+	for i := range p.PastMaintenance {
+		p.History = append(p.History, HistoryEntry{Maintenance: &p.PastMaintenance[i]})
+	}
+	slices.SortStableFunc(p.History, func(a, b HistoryEntry) int { return b.start().Compare(a.start()) })
 	return p
 }
 
@@ -140,25 +165,29 @@ func statusText(s check.Status) string {
 	return "Unknown"
 }
 
-// maintenanceViews lists the windows going on at now (first) and those still to come, by start.
-// Windows that have ended aren't listed: the uptime bars mark the days they touched.
-func maintenanceViews(windows []config.Maintenance, targets []config.Target, now time.Time) []MaintenanceView {
+// maintenanceViews lists the windows going on at now (first) and those still to come, by start;
+// and those that ended in the last DaysShown days, the latest first.
+func maintenanceViews(windows []config.Maintenance, targets []config.Target, now time.Time) (current, past []MaintenanceView) {
 	names := map[string]string{}
 	for _, t := range targets {
 		names[t.ID] = t.Name
 	}
 	out := []MaintenanceView{}
+	past = []MaintenanceView{}
 	for _, w := range windows {
-		if !now.Before(w.End.Time) {
-			continue
-		}
 		v := MaintenanceView{Title: w.Title, Note: w.Note, Start: w.Start.Time, End: w.End.Time,
 			Targets: []string{}, Active: w.Active(now), When: span(w.Start.Time, w.End.Time)}
 		for _, id := range w.TargetIDs {
 			v.Targets = append(v.Targets, cmp.Or(names[id], id))
 		}
-		out = append(out, v)
+		switch {
+		case now.Before(w.End.Time):
+			out = append(out, v)
+		case now.Sub(w.End.Time) <= DaysShown*24*time.Hour:
+			past = append(past, v)
+		}
 	}
+	slices.SortStableFunc(past, func(a, b MaintenanceView) int { return b.End.Compare(a.End) })
 	slices.SortStableFunc(out, func(a, b MaintenanceView) int {
 		if a.Active != b.Active {
 			if a.Active {
@@ -168,7 +197,7 @@ func maintenanceViews(windows []config.Maintenance, targets []config.Target, now
 		}
 		return a.Start.Compare(b.Start)
 	})
-	return out
+	return out, past
 }
 
 // span writes a time range in UTC: "24 Nov 2026, 22:00–23:30 UTC" within a day, otherwise
