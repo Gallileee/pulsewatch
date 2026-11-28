@@ -196,8 +196,8 @@ func TestDispatcherSendsToEveryNotifier(t *testing.T) {
 }
 
 func TestFromConfig(t *testing.T) {
-	w := FromConfig(config.Alert{Format: config.FormatSlack, URL: "https://hooks.test/x"})
-	if w.Name() != "slack" || w.Format != config.FormatSlack {
+	w, ok := FromConfig(config.Alert{Format: config.FormatSlack, URL: "https://hooks.test/x"}).(*Webhook)
+	if !ok || w.Name() != "slack" || w.Format != config.FormatSlack {
 		t.Errorf("%+v", w)
 	}
 	if FromConfig(config.Alert{Name: "team", Format: config.FormatSlack}).Name() != "team" {

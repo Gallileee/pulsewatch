@@ -1,6 +1,22 @@
 # Changelog
 
-## v0.4.0 — maintenance windows
+## v0.5.0 — email alerts
+
+- **`format: email` alerts** send a plain-text email when an incident opens or is resolved:
+  `smtp` (host:port), `security` (`starttls` by default, `tls` for port 465, `none` for a
+  local test server), optional `username` and `password` (from `${VARIABLES}`), `from` and
+  `to`.
+- **Encrypted or not at all:** with `starttls`, nothing but the greeting goes out before the
+  switch to TLS, and a server that doesn't offer STARTTLS gets no email. `security: none`
+  with a password is a config error.
+- **One thread per incident:** the recovery email answers the outage email (`In-Reply-To`,
+  `References`), and both say `Auto-Submitted: auto-generated` so out-of-office replies leave
+  them alone. Subjects are one line even when a check's error has a line break.
+- **Retries** like the webhooks: a dropped connection or an SMTP 4xx reply is tried again after
+  1 s, 2 s and 4 s; a 5xx reply (wrong password, unknown recipient) or an untrusted certificate
+  is reported at once.
+
+## v0.4.0 — maintenance windows (2026-11-23)
 
 - **`maintenance:` in the config** lists planned downtime: a title, a start and an end (RFC 3339
   with a zone, at most 7 days), the targets it covers (all if left out) and a note.

@@ -15,8 +15,16 @@ incidents:
 
 # alerts:
 #   - name: team chat
-#     format: discord         # webhook (JSON), discord or slack
+#     format: discord         # webhook (JSON), discord, slack or email
 #     url: ${DISCORD_WEBHOOK_URL}
+#   - name: on-call
+#     format: email
+#     smtp: smtp.example.com:587   # host:port
+#     security: starttls           # default; tls for port 465, none for a local test server
+#     username: ${SMTP_USERNAME}
+#     password: ${SMTP_PASSWORD}
+#     from: pulsewatch <alerts@example.com>
+#     to: [ops@example.com]
 
 # Planned downtime: failures of the covered targets open no incident, send no alert and don't
 # count against the uptime; the status page announces the window.
