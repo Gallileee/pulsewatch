@@ -46,7 +46,11 @@ watches my other projects, [Market Pulse](https://gallileee.github.io/market-pul
   no alert and is left out of the uptime. Good checks count as usual, so a recovery still
   closes an incident that was open before the window. The page lists the windows going on and
   those announced, marks the target ("Planned maintenance: …, until …") and the daily bar, and
-  the banner says "Maintenance in progress" unless something is really down.
+  the banner says "Maintenance in progress" unless something is really down. Windows that
+  ended in the last 90 days are listed with the incidents ("Maintenance completed").
+- **Maintenance calendar:** `maintenance.ics` is every window as an iCalendar feed. Subscribe
+  to it in Google Calendar, Outlook or Apple Calendar and planned downtime shows up there
+  (as free time, refreshed hourly); editing a window's note updates its event in place.
 - **Alerts** go out when an incident opens or is resolved:
   - **Formats:** a Discord or Slack message, the whole incident as JSON to any webhook, or an
     email.
@@ -68,7 +72,8 @@ watches my other projects, [Market Pulse](https://gallileee.github.io/market-pul
 - **Status page:**
   - **Contents:** an overall banner, then per target its status, last message, uptime for
     24 hours, 7 days and 90 days, 90 daily bars (each with a tooltip) and a response-time line.
-    The incident history is listed below, and planned maintenance above the targets.
+    The history (incidents and completed maintenance, the latest first) is listed below, and
+    planned maintenance above the targets.
   - **Live updates:** the page listens to **server-sent events**. After each check it fetches
     the re-rendered part once a second at most. Without JavaScript it still works, as a plain
     page.
@@ -166,7 +171,7 @@ alerts without a mail account, run [Mailpit](https://mailpit.axllent.org/)
 
 Pulsewatch doesn't have to run all the time. `pulsewatch -once` checks every target once,
 saves the history and exits, and `-site DIR` also writes the status page as static files
-(`index.html`, `status.json`, `static/`). The incident streaks are saved with the history, so
+(`index.html`, `status.json`, `maintenance.ics`, `badge/`, `static/`). The incident streaks are saved with the history, so
 two runs in a row that fail open an incident like two checks in a row do. Nothing about the
 history changes between modes, so a `pulsewatch-data.json` from a server works here too.
 
@@ -200,9 +205,9 @@ The **demo** (`-demo`) runs a small local service that misbehaves on purpose:
 - one fails a quarter of the time, which is not enough for an incident;
 - one has an outage every 6 minutes, so incidents open, alerts would go out and they resolve.
 
-It also plans two maintenance windows: the flaky endpoint is under maintenance for the first
-20 minutes (its failures open no incident), and a window for everything is announced for the
-next evening.
+It also plans three maintenance windows: the flaky endpoint is under maintenance for the
+first 20 minutes (its failures open no incident), a window for everything is announced for the
+next evening, and one for the outage endpoint ended two days before (it's in the history).
 
 ## How it's built
 
@@ -264,8 +269,8 @@ smoke test of the demo inside it. The workflow itself is checked by
   (what Gmail app passwords, Fastmail, Mailgun and most providers accept); no OAuth2 login,
   no HTML. Each alert goes to every recipient in one email, so recipients see each other.
 - Maintenance windows come from the config, so changing them means a restart (or the next
-  `-once` run). Windows that have ended aren't listed; the daily bars and their tooltips show
-  the failures they covered. Windows don't repeat (no "every Sunday 02:00").
+  `-once` run). A window removed from the config also leaves the history and the calendar.
+  Windows don't repeat (no "every Sunday 02:00").
 
 ## License
 

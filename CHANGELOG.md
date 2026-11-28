@@ -1,6 +1,6 @@
 # Changelog
 
-## v0.5.0 — email alerts
+## v0.5.0 — email alerts, maintenance history and calendar
 
 - **`format: email` alerts** send a plain-text email when an incident opens or is resolved:
   `smtp` (host:port), `security` (`starttls` by default, `tls` for port 465, `none` for a
@@ -15,6 +15,13 @@
 - **Retries** like the webhooks: a dropped connection or an SMTP 4xx reply is tried again after
   1 s, 2 s and 4 s; a 5xx reply (wrong password, unknown recipient) or an untrusted certificate
   is reported at once.
+- **Completed maintenance in the history:** windows that ended in the last 90 days are listed
+  with the incidents, the latest first ("Maintenance completed"), and in `status.json` as
+  `past_maintenance`.
+- **`maintenance.ics`:** every window as an iCalendar feed (RFC 5545) to subscribe to, served
+  at `/maintenance.ics` and written by `-site`; linked from the maintenance section and the
+  footer. Events are free time, keep their UID across runs (it comes from the title, start and end) and ask calendars to refresh hourly.
+- The demo also has a window that ended two days before.
 
 ## v0.4.0 — maintenance windows (2026-11-23)
 

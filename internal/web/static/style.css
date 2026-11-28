@@ -236,6 +236,10 @@ h3 { font-size: 1.05rem; margin: 0; }
 
 .incident p, .window p { margin: 2px 0; font-size: 0.9rem; overflow-wrap: anywhere; }
 .window-active { border-left: 6px solid var(--maint); }
+.window-done { border-left: 6px solid var(--maint-soft); }
+.section-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.section-head h2 { margin: 0; }
+.section-head a { font-size: 0.85rem; }
 .incident-open { border-left: 6px solid var(--down); }
 
 .foot {

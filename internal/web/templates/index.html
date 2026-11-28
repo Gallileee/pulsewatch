@@ -23,6 +23,7 @@
   <footer class="wrap foot">
     <p>Uptime counts degraded checks as up and leaves out failures during planned maintenance. Days are in UTC.
       {{if .Static}}<a href="status.json">JSON</a>{{else}}<a href="api/status">JSON</a> · <a href="metrics">Prometheus metrics</a>{{end}} ·
+      <a href="maintenance.ics">Maintenance calendar</a> ·
       Powered by <a href="https://github.com/Gallileee/pulsewatch">Pulsewatch</a></p>
   </footer>
 </body>
@@ -36,7 +37,10 @@
 
 {{if .Maintenance}}
 <section class="maintenance" aria-labelledby="maintenance-title">
-  <h2 id="maintenance-title">Scheduled maintenance</h2>
+  <div class="section-head">
+    <h2 id="maintenance-title">Scheduled maintenance</h2>
+    <a href="maintenance.ics" class="muted">Add to calendar</a>
+  </div>
   <ol>
     {{range .Maintenance}}
     <li class="window{{if .Active}} window-active{{end}}">
@@ -85,10 +89,11 @@
 </section>
 
 <section class="incidents" aria-labelledby="incidents-title">
-  <h2 id="incidents-title">Incidents</h2>
-  {{if .Incidents}}
+  <h2 id="incidents-title">{{if .PastMaintenance}}Incidents and maintenance{{else}}Incidents{{end}}</h2>
+  {{if .History}}
   <ol>
-    {{range .Incidents}}
+    {{range .History}}
+    {{with .Incident}}
     <li class="incident {{if .Open}}incident-open{{end}}">
       <p><strong>{{.TargetName}}</strong>
         {{if .Open}}<span class="pill pill-down">Ongoing</span>{{else}}<span class="pill pill-up">Resolved</span>{{end}}</p>
@@ -96,6 +101,15 @@
       <p class="muted">Started <time datetime="{{iso .Started}}">{{clock .Started}}</time>
         · {{if .Open}}going on for{{else}}lasted{{end}} {{.DurationText}} · {{.Checks}} failed checks</p>
     </li>
+    {{end}}
+    {{with .Maintenance}}
+    <li class="window window-done">
+      <p><strong>{{.Title}}</strong> <span class="pill pill-maintenance">Maintenance completed</span></p>
+      {{if .Note}}<p>{{.Note}}</p>{{end}}
+      <p class="muted"><time datetime="{{iso .Start}}">{{.When}}</time> ·
+        {{if .Targets}}{{range $i, $name := .Targets}}{{if $i}}, {{end}}{{$name}}{{end}}{{else}}All services{{end}}</p>
+    </li>
+    {{end}}
     {{end}}
   </ol>
   {{else}}

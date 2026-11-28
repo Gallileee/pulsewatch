@@ -58,6 +58,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/events", s.events)
 	mux.HandleFunc("GET /metrics", s.metrics)
 	mux.HandleFunc("GET /badge/{file}", s.badge)
+	mux.HandleFunc("GET /maintenance.ics", s.calendar)
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 		_, _ = w.Write([]byte("ok\n"))
@@ -66,8 +67,9 @@ func (s *Server) Handler() http.Handler {
 	return securityHeaders(mux)
 }
 
-// WriteSite writes the status page as static files into dir: index.html, status.json and the
-// static/ assets, for hosting without Pulsewatch running (GitHub Pages, any web server).
+// WriteSite writes the status page as static files into dir: index.html, status.json,
+// maintenance.ics, the badges and the static/ assets, for hosting without Pulsewatch running
+// (GitHub Pages, any web server).
 func (s *Server) WriteSite(dir string) error {
 	s.parse()
 	page := s.build()
@@ -83,7 +85,11 @@ func (s *Server) WriteSite(dir string) error {
 	if err != nil {
 		return err
 	}
-	files := map[string][]byte{"index.html": html.Bytes(), "status.json": append(data, '\n')}
+	files := map[string][]byte{
+		"index.html":      html.Bytes(),
+		"status.json":     append(data, '\n'),
+		"maintenance.ics": Calendar(s.Title, s.Maintenance, s.Targets, page.Generated),
+	}
 	if err := os.MkdirAll(filepath.Join(dir, "badge"), 0o755); err != nil {
 		return err
 	}
@@ -147,6 +153,13 @@ func (s *Server) status(w http.ResponseWriter, _ *http.Request) {
 	enc := json.NewEncoder(w)
 	enc.SetIndent("", "  ")
 	_ = enc.Encode(s.build())
+}
+
+// calendar serves the maintenance windows for calendar apps to subscribe to.
+func (s *Server) calendar(w http.ResponseWriter, _ *http.Request) {
+	w.Header().Set("Content-Type", "text/calendar; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-cache")
+	_, _ = w.Write(Calendar(s.Title, s.Maintenance, s.Targets, s.Clock.Now()))
 }
 
 func (s *Server) metrics(w http.ResponseWriter, _ *http.Request) {
