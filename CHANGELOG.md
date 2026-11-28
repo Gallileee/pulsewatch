@@ -20,7 +20,8 @@
   `past_maintenance`.
 - **`maintenance.ics`:** every window as an iCalendar feed (RFC 5545) to subscribe to, served
   at `/maintenance.ics` and written by `-site`; linked from the maintenance section and the
-  footer. Events are free time, keep their UID across runs (it comes from the title, start and end) and ask calendars to refresh hourly.
+  footer. Events are free time, keep their UID across runs (made from the title, start and
+  end) and ask calendars to refresh hourly.
 - The demo also has a window that ended two days before.
 
 ## v0.4.0 — maintenance windows (2026-11-23)
